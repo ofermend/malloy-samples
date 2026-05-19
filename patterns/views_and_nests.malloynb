@@ -1,0 +1,70 @@
+>>>markdown
+# Views and Nested Drill-Down
+
+A `view:` is a named, reusable query shape defined inside a source. A `nest:` embeds one query inside another so you get drill-down detail alongside summaries — without writing a second query.
+
+Together they let you compose dashboards out of small, named pieces.
+>>>malloy
+source: flights is duckdb.table('data/flights.parquet') extend {
+  measure:
+    flight_count is count()
+    avg_delay is dep_delay.avg()
+
+  view: by_carrier is {
+    group_by: carrier
+    aggregate: flight_count, avg_delay
+  }
+
+  view: by_origin is {
+    top: 5
+    group_by: origin
+    aggregate: flight_count, avg_delay
+  }
+}
+>>>markdown
+A named view is callable with `->`:
+>>>malloy
+run: flights -> by_carrier
+>>>markdown
+## Refining a view at the call site
+
+Use `+ { ... }` to add filters, limits, or extra clauses to a view without redefining it:
+>>>malloy
+run: flights -> by_carrier + {
+  where: dep_time = @2003
+  top: 5
+  order_by: flight_count desc
+}
+>>>markdown
+## Nesting views for drill-down
+
+`nest:` embeds another query under each row of the outer query. Here, each carrier row gets its own top-5 origin breakdown — one query, two levels of detail:
+>>>malloy
+run: flights -> by_carrier + {
+  nest: top_origins is by_origin
+}
+>>>markdown
+## Inline (ad-hoc) nests
+
+You don't have to predefine the inner view. Inline `nest:` blocks are great for one-off drill-downs:
+>>>malloy
+run: flights -> {
+  group_by: carrier
+  aggregate: flight_count
+  nest: by_year is {
+    group_by: flight_year is dep_time.year
+    aggregate: flight_count
+    order_by: flight_year
+  }
+  nest: top_destinations is {
+    top: 3
+    group_by: destination
+    aggregate: flight_count
+  }
+}
+>>>markdown
+## When to reach for views vs nests
+
+- **Define a `view:`** when the same query shape will be used in multiple places. One source of truth.
+- **Use inline `nest:`** for ad-hoc drill-downs that only make sense in one report.
+- **Compose with `+`** to share a view's shape across reports while adding context-specific filters.
