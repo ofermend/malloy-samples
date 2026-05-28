@@ -75,7 +75,7 @@ Once you've finished the tour, the patterns library is a reference organized by 
 ### Reusable structure
 * [Parameterized Sources](patterns/parameterized_sources.malloynb) — Reuse the same source with different filters, thresholds, or values via runtime parameters.
 * [Views and Nested Drill-down](patterns/views_and_nests.malloynb) — Define reusable named query shapes and embed nested drill-downs in one query.
-* [Composite Sources](patterns/composite_sources.malloynb) — Unify multiple underlying sources so Malloy can pick the lightest one for each query.
+* [Composite Sources](patterns/composite_sources.malloynb) — Route queries to the appropriate grain (raw detail vs. pre-aggregated summaries)
 
 ### Other techniques
 * [Dimensional Indexes](patterns/dim_index.malloynb) - Find the most common values in your dataset.
