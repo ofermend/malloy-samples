@@ -1,9 +1,9 @@
 >>>markdown
 # Parameterized Sources
 
-A source can declare **parameters** that callers fill in when they use the source. Use them when you want to reuse the same model with different filters, thresholds, or values — without copy-pasting the source definition.
+A source can declare **parameters** that callers fill in when they use the source. Use them when you want to reuse the same model with different filters, thresholds, or values - without copy-pasting the source definition.
 
-> Source parameters are currently behind an experimental flag: `##! experimental.parameters`.
+\> Source parameters are currently behind an experimental flag: `##! experimental.parameters`.
 >>>malloy
 ##! experimental.parameters
 
@@ -51,11 +51,3 @@ run: delayed_flights(min_delay is 60, origin_filter is 'JFK') -> {
   group_by: carrier
   aggregate: flight_count, avg_delay
 }
->>>markdown
-## When to reach for parameters
-
-- **Cohort definitions** — same shape, different population (e.g. `cohort_query(condition is 'diabetes')`).
-- **Threshold sweeps** — re-run the same analysis at multiple cutoffs.
-- **Reusable widgets** — embed parameterized queries in dashboards/apps that swap arguments at runtime.
-
-If you just need a one-off filter, use a `where:` clause. Reach for parameters when the *same* analysis needs to run with different values across many call sites.

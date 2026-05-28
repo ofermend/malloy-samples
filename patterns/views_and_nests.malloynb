@@ -1,7 +1,7 @@
 >>>markdown
 # Views and Nested Drill-Down
 
-A `view:` is a named, reusable query shape defined inside a source. A `nest:` embeds one query inside another so you get drill-down detail alongside summaries — without writing a second query.
+A `view:` is a named, reusable query shape defined inside a source. A `nest:` embeds one query inside another so you get drill-down detail alongside summaries - without writing a second query.
 
 Together they let you compose dashboards out of small, named pieces.
 >>>malloy
@@ -62,9 +62,3 @@ run: flights -> {
     aggregate: flight_count
   }
 }
->>>markdown
-## When to reach for views vs nests
-
-- **Define a `view:`** when the same query shape will be used in multiple places. One source of truth.
-- **Use inline `nest:`** for ad-hoc drill-downs that only make sense in one report.
-- **Compose with `+`** to share a view's shape across reports while adding context-specific filters.

@@ -3,9 +3,10 @@
 
 A **composite source** unifies multiple underlying sources into one logical source. When you query it, Malloy automatically picks the member source that has the fields your query needs.
 
-Use this when you have the same logical data exposed at different grains (raw events vs. pre-aggregated rollups, or partitioned tables) and you want callers to write *one* query that transparently routes to the right physical source.
+Use this when you have the same logical data exposed at different grains (raw events vs. pre-aggregated rollups, or partitioned tables) and you want callers to write *one* query that transparently routes to the right physical source. See the [docs](https://docs.malloydata.dev/documentation/experiments/composite_sources) for more details.
 
-> Composite sources are currently behind an experimental flag: `##! experimental.composite_sources`. For a larger end-to-end example (32 cube variants), see [`cubed_data/`](../cubed_data/).
+
+\> Composite sources are currently behind an experimental flag: `##! experimental.composite_sources`. For a larger end-to-end example (32 cube variants), see [`cubed_data/`](../cubed_data/).
 >>>malloy
 ##! experimental.composite_sources
 
@@ -37,7 +38,7 @@ run: flights -> {
   aggregate: flight_count
 }
 >>>markdown
-## Per-tail-number query — falls back to the detail source
+## Per-tail-number query: falls back to the detail source
 
 `tail_num` isn't in the summary source, so Malloy uses `flights_detail`:
 >>>malloy
@@ -46,13 +47,3 @@ run: flights -> {
   group_by: tail_num
   aggregate: flight_count, avg_delay
 }
->>>markdown
-## Why this matters
-
-In production, the slim source would be a pre-computed rollup that's 100×–1000× smaller than the raw table. Composite sources let you:
-
-- Speed up the common queries by routing them to the rollup
-- Keep ad-hoc queries against detail data working transparently
-- Stop maintaining two parallel query libraries — one model serves both
-
-See [`cubed_data/`](../cubed_data/) for the full pattern at 32 grains.
