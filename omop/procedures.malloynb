@@ -1,0 +1,73 @@
+>>>markdown
+# Procedures and Clinical Interventions
+
+OMOP procedure_occurrence captures all clinical procedures - surgeries, diagnostic procedures, interventions, etc. This notebook shows common procedures, their frequency, and how procedures relate to patient conditions.
+
+The `top: 10` keyword limits results to the 10 most frequent procedures, and `procedure_count` and `patient_count` are pre-defined measures in the source. This demonstrates measure reuse: once defined in the model, they're available anywhere without recalculating, keeping queries readable and consistent.
+>>>malloy
+import 'omop.malloy'
+
+# Top procedures by frequency
+run: procedure_occurrence -> {
+  top: 10
+  group_by: procedure_concept.concept_name
+  aggregate:
+    procedure_count
+    patient_count
+  order_by: procedure_count desc
+}
+>>>markdown
+
+## Procedures by patient age and gender
+
+Grouping by `person.age_band` and `person.gender.concept_name` traverses the join to demographic dimensions naturally. Malloy understands that both dimensions come from the same person row, avoiding the SQL pattern of multiple JOINs and careful NULL handling.
+>>>malloy
+run: procedure_occurrence -> {
+  group_by:
+    person.age_band
+    person.gender.concept_name
+  aggregate:
+    procedure_count
+    patient_count
+}
+>>>markdown
+
+## Procedures co-occurring with a condition
+
+Starting from `patient` and filtering by a condition, then grouping by procedures, shows Malloy's symmetric aggregates: both conditions and procedures are join-many under patient, but `procedures.patient_count` is correctly unsummarized without fan-out. In SQL, this fan-out problem requires careful subqueries or aggregate logic.
+>>>malloy
+run: patient -> {
+  where: conditions.condition_concept.concept_name ~ r'(?i)osteoarthritis'
+  group_by: procedures.procedure_concept.concept_name
+  aggregate:
+    procedure_count is procedures.procedure_count
+    affected_patients is procedures.patient_count
+  order_by: affected_patients desc
+  limit: 10
+}
+>>>markdown
+
+## Patients with multiple procedures
+
+The two-stage pipeline (`->`) first groups by patient to calculate their total procedure count, then re-aggregates to show how many patients fall into each count bucket. This avoids the SQL anti-pattern of grouping by a measure; the pipeline makes the intent clear: aggregate, then analyze the result.
+>>>malloy
+run: patient -> {
+  group_by: person_id
+  aggregate: my_procedure_count is total_procedures
+} -> {
+  group_by: my_procedure_count
+  aggregate: patient_count is count()
+  order_by: my_procedure_count
+}
+>>>markdown
+
+## Procedure timeline per patient
+
+Grouping by `procedure_date` creates a chronological sequence, showing the exact order and frequency of procedures for a patient. Date grouping in Malloy is automatic - no manual date extraction needed like in SQL.
+>>>malloy
+run: procedure_occurrence -> {
+  where: person_id = 1
+  group_by: procedure_date, procedure_concept.concept_name
+  aggregate: procedure_count is count()
+  order_by: procedure_date
+}

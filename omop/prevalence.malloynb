@@ -1,0 +1,40 @@
+>>>markdown
+# Condition Prevalence Over Time
+
+Disease prevalence (the share of patients carrying a diagnosis) by year and age band - one of the most common OMOP analyses. Shows Malloy's level-of-detail `all(...)` for percent-of-total calculations and pipeline-friendly time bucketing.
+
+The `dx_year` dimension extracts year from the condition date automatically as a grouped output. This tracks how diagnoses change annually across the cohort without manual date arithmetic.
+>>>malloy
+import 'omop.malloy'
+
+# line_chart
+run: condition_occurrence -> {
+  where: condition_concept.concept_name ~ r'(?i)acute bronchitis'
+  group_by: dx_year
+  aggregate: patient_count
+  order_by: dx_year
+}
+>>>markdown
+## Stratify by age band
+
+Adding a second `group_by:` produces a multi-series breakdown. Malloy automatically traverses the `person` join to access `age_band` dimensions; in SQL you would need to carefully handle the cardinality and ensure no accidental cross-joins. The renderer produces separate series for each age group.
+>>>malloy
+# line_chart
+run: condition_occurrence -> {
+  where: condition_concept.concept_name ~ r'(?i)acute bronchitis'
+  group_by: dx_year, person.age_band
+  aggregate: patient_count
+  order_by: dx_year
+}
+>>>markdown
+## Share of yearly diagnoses
+
+The `all()` function calculates aggregates across the full dataset while still grouped by age band - dividing each row by the total to get percentages. This is a level-of-detail (LOD) computation: each row stays grouped but references a global aggregate. In SQL this needs a window function or correlated subquery; Malloy makes it a single expression without the boilerplate.
+>>>malloy
+run: condition_occurrence -> {
+  where: condition_concept.concept_name ~ r'(?i)acute bronchitis'
+  group_by: person.age_band
+  aggregate:
+    patients is patient_count
+    pct_of_cohort is patient_count / all(patient_count) * 100
+}

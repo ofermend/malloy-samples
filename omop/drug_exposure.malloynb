@@ -1,0 +1,49 @@
+>>>markdown
+# Drug Exposure Analysis
+
+Two ideas in one notebook:
+
+1. **Top drugs** with prescribing volume and average days-supply
+2. **Drug ↔ condition co-occurrence** - for every top drug, count distinct conditions diagnosed for the same patients. This is where Malloy's **symmetric aggregates** shine: counting drugs and counting conditions through different join paths from the same `patient` root produces correct numbers without fan-out.
+
+The first query uses `top: 10` to limit results and `group_by` on drug name with named measures. In Malloy, measures like `exposure_count`, `patient_count`, and `avg_days_supply` are pre-defined in the source, so you just reference them by name without recalculating.
+>>>malloy
+import 'omop.malloy'
+
+run: drug_exposure -> {
+  top: 10
+  group_by: drug_concept.concept_name
+  aggregate:
+    exposure_count
+    patient_count
+    avg_days_supply
+}
+>>>markdown
+## Drug-condition co-occurrence with symmetric aggregates
+
+For each top drug, count distinct conditions across the patients who received it. This is a classic OMOP multi-fact problem: you're counting two different event tables through the same patient root, which causes fan-out in SQL (each condition row multiplies the drug count). Malloy's symmetric aggregates solve this by understanding the join structure: `conditions.count()` and `drugs.count()` are both correct independently, even though both join-many under `patient`. In SQL this would require careful subqueries or aggregation logic; in Malloy it's a single nested expression.
+
+The query starts from `patient` (not from `drug_exposure`). It filters to a specific drug and then counts conditions — which live independently of the drug join-many. The expression `conditions.count()` traverses the join graph correctly and returns distinct conditions per drug, without double-counting.
+>>>malloy
+run: patient -> {
+  top: 10
+  where: drugs.drug_concept.concept_name ~ r'(?i)acetaminophen'
+  group_by: drugs.drug_concept.concept_name
+  aggregate:
+    drug_users is person_count
+    // distinct conditions across these patients - note this is `conditions.count()`,
+    // not `drugs.conditions.count()`. Conditions live one join-hop away from person,
+    // independent of drugs. The fan-out is correct by construction.
+    distinct_conditions is conditions.count()
+}
+>>>markdown
+## Distribution of days-supply
+
+Show the spread of prescription lengths for a single drug. Grouping by `days_supply` creates natural histogram buckets. The `where:` clause filters to the drug of interest, and `order_by: days_supply` sorts the buckets for readability.
+>>>malloy
+run: drug_exposure -> {
+  where: drug_concept.concept_name ~ r'(?i)amoxicillin'
+  group_by: days_supply
+  aggregate: exposure_count
+  order_by: days_supply
+}

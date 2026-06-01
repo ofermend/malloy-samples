@@ -1,0 +1,53 @@
+>>>markdown
+# OMOP CDM Sample - OHDSI Eunomia
+
+## What is OMOP?
+
+The **OMOP Common Data Model** is the dominant open standard for structuring observational health data across health systems. Maintained by [OHDSI](https://ohdsi.org/) (Observational Health Data Sciences and Informatics), OMOP is used by hundreds of academic medical centers, health systems, and research networks globally to standardize electronic health records into a single schema. This means a cohort study, propensity score analysis, or phenotype built on one OMOP database runs unchanged on any other - enabling evidence synthesis across health systems at scale. Learn more at [OMOP CDM docs](https://ohdsi.github.io/CommonDataModel/).
+
+## This sample
+
+This sample analyzes synthetic patient electronic health record (EHR) data structured according to **OMOP CDM v5.3**. The dataset is the [OHDSI Eunomia GiBleed_5.3 release](https://github.com/OHDSI/EunomiaDatasets) - ~2,700 synthetic patients with conditions, drugs, visits, procedures, and measurements.
+
+\> **Before opening other notebooks in this folder:** run `bash omop/scripts/setup.sh` once from the repo root. It downloads the Eunomia dataset (~6.5 MB) and converts it to ZSTD Parquet under `omop/data/` (gitignored). No PHI, no GCP, no Java.
+
+## What's in the model
+
+[`omop.malloy`](omop.malloy) defines the semantic model for OMOP:
+
+- **`person`** - patient demographics, with `concept` joined for gender / race / ethnicity. Single source of truth for demographic dimensions.
+- **`condition_occurrence`**, **`drug_exposure`**, **`visit_occurrence`**, **`procedure_occurrence`**, **`measurement`** - clinical event tables, each joined to `person` and to its own `concept` row for the human-readable name.
+- **`concept`** - the OMOP vocabulary (~440 entries in Eunomia). One source, reused under many join aliases (`gender`, `condition_concept`, `drug_concept`, etc.) - saves duplication in the model and queries.
+- **`patient`** - extends `person` with `join_many:` to conditions, drugs, visits, procedures. Demonstrates symmetric aggregates: `conditions.count()` and `drugs.count()` are both correct even though both join-many under patient (the classic OMOP fan-out problem).
+
+## First query - demographic breakdown
+
+A quick look at the patient population. The `patient.demographics` view rolls patients up by gender × age band. This demonstrates Malloy's **named views**: reusable query templates defined once in the model and called by name. The `patient.demographics` view encapsulates grouping and aggregation logic, reducing copy-paste and keeping the model semantically clear.
+>>>malloy
+import 'omop.malloy'
+
+# bar_chart
+run: patient -> demographics
+>>>markdown
+## Top conditions and drugs across all patients
+
+Two preset views on the `patient` source. Each view is a compact query shape defined in the model, allowing you to analyze different aspects of the same `patient` root without repeating logic. The `->` operator pipes one query stage to the next; here it applies a named view like a function call.
+>>>malloy
+run: patient -> top_conditions
+>>>malloy
+run: patient -> top_drugs
+>>>markdown
+## Where to go next
+
+| Notebook | Topic |
+|---|---|
+| [`cohorts.malloynb`](cohorts.malloynb) | Defining patient cohorts via filters + joins |
+| [`prevalence.malloynb`](prevalence.malloynb) | Condition prevalence over time + age bands |
+| [`drug_exposure.malloynb`](drug_exposure.malloynb) | Top drugs, days-supply, fan-out-safe co-occurrence |
+| [`treatment_pathways.malloynb`](treatment_pathways.malloynb) | Sequence of drugs after a first diagnosis |
+| [`measurement.malloynb`](measurement.malloynb) | Lab values and vital signs - frequency, trends, abnormal results |
+| [`procedures.malloynb`](procedures.malloynb) | Procedures by patient, conditions, demographics; utilization patterns |
+| [`vocabulary_explorer.malloynb`](vocabulary_explorer.malloynb) | Search the concept vocabulary to find condition / drug names |
+| [`parameterized_cohorts.malloynb`](parameterized_cohorts.malloynb) | Reusable cohort study: run the same analysis for different conditions |
+
+For background on the Malloy patterns used here - symmetric aggregates, views, nested results - see the [`patterns/`](../patterns/) directory.

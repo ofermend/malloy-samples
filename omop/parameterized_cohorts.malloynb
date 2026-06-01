@@ -1,0 +1,81 @@
+>>>markdown
+# Cohort Reusability Patterns
+
+A common OHDSI research workflow is to define a cohort analysis once, then run it for multiple conditions or drugs. This notebook shows how to analyze patient cohorts and compare them across different clinical conditions.
+
+The pattern: filter to a specific condition, then aggregate demographics and identify common comorbidities. By running the same query structure with different condition filters, you can compare cohort characteristics without duplicating logic.
+>>>malloy
+import 'omop.malloy'
+
+# Sinusitis cohort: demographics
+run: patient -> {
+  where: conditions.condition_concept.concept_name ~ r'(?i)sinusitis'
+  group_by: age_band, gender.concept_name
+  aggregate: cohort_size is person_count
+}
+>>>markdown
+
+## Compare across different conditions
+
+The same query structure applied to a different condition shows how cohort characteristics vary. This demonstrates the reusability of analysis patterns - write once, parameterize by changing the where clause.
+>>>malloy
+# Osteoarthritis cohort: demographics
+run: patient -> {
+  where: conditions.condition_concept.concept_name ~ r'(?i)osteoarthritis'
+  group_by: age_band, gender.concept_name
+  aggregate: cohort_size is person_count
+}
+>>>markdown
+
+## Comorbidity comparison
+
+For each cohort, identify the top 5 comorbidities. Nesting a sub-query within the cohort filter shows the power of composition: the outer filter narrows to one condition, then the nested query finds other conditions in those patients. Compare how different primary conditions have different comorbidity patterns.
+>>>malloy
+# Sinusitis cohort: top comorbidities
+run: patient -> {
+  where: conditions.condition_concept.concept_name ~ r'(?i)sinusitis'
+  aggregate: cohort_size is person_count
+  nest: top_comorbidities is {
+    top: 5
+    where: conditions.condition_concept.concept_name !~ r'(?i)sinusitis'
+    group_by: comorbidity is conditions.condition_concept.concept_name
+    aggregate: affected_patients is conditions.patient_count
+  }
+}
+>>>malloy
+
+# Osteoarthritis cohort: top comorbidities
+run: patient -> {
+  where: conditions.condition_concept.concept_name ~ r'(?i)osteoarthritis'
+  aggregate: cohort_size is person_count
+  nest: top_comorbidities is {
+    top: 5
+    where: conditions.condition_concept.concept_name !~ r'(?i)osteoarthritis'
+    group_by: comorbidity is conditions.condition_concept.concept_name
+    aggregate: affected_patients is conditions.patient_count
+  }
+}
+>>>markdown
+
+## Multi-criteria cohorts
+
+Combine condition and drug filters to define more specific cohorts. Patients with osteoarthritis who took aspirin form a more granular cohort for targeted analysis. Multiple `where:` clauses apply independently across join-many relationships; Malloy handles the logic correctly without manual cross-join management.
+>>>malloy
+# Osteoarthritis patients on aspirin
+run: patient -> {
+  where:
+    conditions.condition_concept.concept_name ~ r'(?i)osteoarthritis',
+    drugs.drug_concept.concept_name ~ r'(?i)aspirin'
+  group_by: age_band
+  aggregate: cohort_size is person_count
+}
+>>>malloy
+
+# Sinusitis patients on amoxicillin
+run: patient -> {
+  where:
+    conditions.condition_concept.concept_name ~ r'(?i)sinusitis',
+    drugs.drug_concept.concept_name ~ r'(?i)amoxicillin'
+  group_by: age_band
+  aggregate: cohort_size is person_count
+}

@@ -1,0 +1,58 @@
+>>>markdown
+# Vocabulary Explorer
+
+OMOP uses numeric concept_id for every clinical fact - conditions, drugs, procedures, measurements, and so on. Before you write any cohort query, you need to find the right concept_name that represents what you're looking for (e.g. "osteoarthritis" or "amoxicillin"). The concept vocabulary in Eunomia has ~440 entries across all domains. This notebook uses Malloy's `index:` operator to search the vocabulary and discover the names you need.
+
+Malloy's `index:` operator unpivots a row into (fieldName, fieldValue, fieldType) tuples, making it easy to search across all columns at once. This is exactly what you need for vocabulary exploration: one operator, no manual UNPIVOT/UNION logic like in SQL.
+>>>malloy
+import 'omop.malloy'
+
+# Table all concept field/value pairs in the vocabulary
+run: concept -> {
+  index: *
+} -> {
+  select: *
+  where: fieldType = 'string'
+  limit: 20
+}
+>>>markdown
+
+## Find a condition by name
+
+After unpivoting with `index:`, you can filter the resulting (fieldName, fieldValue) tuples to find all occurrences of a search term across the entire concept. The `weight` field ranks hits by frequency, so exact matches or common synonyms float to the top.
+>>>malloy
+run: concept -> {
+  index: *
+} -> {
+  select: *
+  where: fieldValue ~ r'(?i)osteoarthritis'
+  limit: 10
+}
+>>>markdown
+
+## Scope to a single domain
+
+Filter by `domain_id` *before* unpivoting with `index:` to focus on one clinical domain (conditions, drugs, procedures, measurements, etc.). After `index:`, only the unpivoted columns exist, so filtering must happen in the first stage. Use the exact concept_name from results in your cohort queries.
+>>>malloy
+run: concept -> {
+  where: domain_id = 'Condition'
+  index: *
+} -> {
+  select: *
+  where: fieldValue ~ r'(?i)sinusitis'
+  limit: 10
+}
+>>>markdown
+
+## Concept search for drug names
+
+The same unpivot-and-filter pattern works for any domain. Filter by `domain_id = 'Drug'` first to narrow the search space, then search the unpivoted field values for the medication you need.
+>>>malloy
+run: concept -> {
+  where: domain_id = 'Drug'
+  index: *
+} -> {
+  select: *
+  where: fieldValue ~ r'(?i)amoxicillin'
+  limit: 5
+}

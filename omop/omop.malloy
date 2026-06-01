@@ -1,0 +1,144 @@
+// Malloy semantic model for the OHDSI OMOP Common Data Model v5.3.
+//
+// Data: OHDSI Eunomia GiBleed_5.3 (~2.7k synthetic patients with a
+// GI-bleed cohort).  Generated on-demand by omop/scripts/setup.sh.
+//
+// This model mirrors the OMOP convention of one row per clinical event
+// (visit, condition, drug exposure, etc.) tied back to PERSON. The
+// CONCEPT table is the vocabulary backbone — every *_concept_id in a
+// fact table joins to it. We reuse the same `concept` source with
+// different join aliases so a condition's name, a drug's name, and a
+// patient's gender all read from the same vocabulary table without
+// duplication.
+
+source: concept is duckdb.table('omop/data/concept.parquet') extend {
+  primary_key: concept_id
+  measure: concept_count is count()
+}
+
+source: vocabulary is duckdb.table('omop/data/vocabulary.parquet') extend {
+  primary_key: vocabulary_id
+}
+
+source: domain is duckdb.table('omop/data/domain.parquet') extend {
+  primary_key: domain_id
+}
+
+source: person is duckdb.table('omop/data/person.parquet') extend {
+  primary_key: person_id
+  join_one: gender is concept on gender_concept_id = gender.concept_id
+  join_one: race is concept on race_concept_id = race.concept_id
+  join_one: ethnicity is concept on ethnicity_concept_id = ethnicity.concept_id
+
+  dimension:
+    age is year(now) - year_of_birth
+    age_band is age ?
+      pick '0-17'  when < 18
+      pick '18-39' when < 40
+      pick '40-64' when < 65
+      else '65+'
+
+  measure: person_count is count()
+}
+
+source: visit_occurrence is duckdb.table('omop/data/visit_occurrence.parquet') extend {
+  primary_key: visit_occurrence_id
+  join_one: person with person_id
+  join_one: visit_concept is concept on visit_concept_id = visit_concept.concept_id
+
+  measure:
+    visit_count is count()
+    patient_count is count(person_id)
+}
+
+source: condition_occurrence is duckdb.table('omop/data/condition_occurrence.parquet') extend {
+  primary_key: condition_occurrence_id
+  join_one: person with person_id
+  join_one: condition_concept is concept on condition_concept_id = condition_concept.concept_id
+
+  dimension:
+    dx_year is year(condition_start_date)
+
+  measure:
+    condition_count is count()
+    patient_count is count(person_id)
+}
+
+source: drug_exposure is duckdb.table('omop/data/drug_exposure.parquet') extend {
+  primary_key: drug_exposure_id
+  join_one: person with person_id
+  join_one: drug_concept is concept on drug_concept_id = drug_concept.concept_id
+
+  measure:
+    exposure_count is count()
+    patient_count is count(person_id)
+    avg_days_supply is days_supply.avg()
+    total_days_supply is days_supply.sum()
+}
+
+source: procedure_occurrence is duckdb.table('omop/data/procedure_occurrence.parquet') extend {
+  primary_key: procedure_occurrence_id
+  join_one: person with person_id
+  join_one: procedure_concept is concept on procedure_concept_id = procedure_concept.concept_id
+
+  measure:
+    procedure_count is count()
+    patient_count is count(person_id)
+}
+
+source: measurement is duckdb.table('omop/data/measurement.parquet') extend {
+  primary_key: measurement_id
+  join_one: person with person_id
+  join_one: measurement_concept is concept on measurement_concept_id = measurement_concept.concept_id
+  join_one: unit is concept on unit_concept_id = unit.concept_id
+
+  dimension:
+    value_num is value_as_number::number
+
+  measure:
+    measurement_count is count()
+    patient_count is count(person_id)
+    avg_value is value_num.avg()
+}
+
+// Patient-centric view. Extends `person` with join_many to the four
+// most-queried fact tables. Use this source when you want to ask
+// "what does this patient look like across conditions, drugs, visits?"
+// in a single query — Malloy's symmetric aggregates make `conditions.count()`
+// and `drugs.count()` correct even though both join-many under person.
+source: patient is person extend {
+  join_many: conditions is condition_occurrence on person_id = conditions.person_id
+  join_many: drugs is drug_exposure on person_id = drugs.person_id
+  join_many: visits is visit_occurrence on person_id = visits.person_id
+  join_many: procedures is procedure_occurrence on person_id = procedures.person_id
+
+  measure:
+    // Symmetric aggregates: each count below is correct independently
+    // of the others, even though all three tables fan out under person.
+    total_conditions is conditions.count()
+    total_drugs is drugs.count()
+    total_visits is visits.count()
+    total_procedures is procedures.count()
+
+  view: demographics is {
+    group_by: gender.concept_name, age_band
+    aggregate: person_count
+  }
+
+  view: top_conditions is {
+    top: 10
+    group_by: conditions.condition_concept.concept_name
+    aggregate:
+      conditions.condition_count
+      affected_patients is conditions.patient_count
+  }
+
+  view: top_drugs is {
+    top: 10
+    group_by: drugs.drug_concept.concept_name
+    aggregate:
+      drugs.exposure_count
+      patient_count is drugs.patient_count
+      drugs.avg_days_supply
+  }
+}
