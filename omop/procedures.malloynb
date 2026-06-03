@@ -3,7 +3,7 @@
 
 OMOP procedure_occurrence captures all clinical procedures - surgeries, diagnostic procedures, interventions, etc. This notebook shows common procedures, their frequency, and how procedures relate to patient conditions.
 
-The `top: 10` keyword limits results to the 10 most frequent procedures, and `procedure_count` and `patient_count` are pre-defined measures in the source. This demonstrates measure reuse: once defined in the model, they're available anywhere without recalculating, keeping queries readable and consistent.
+`top: 10` keeps the 10 most frequent procedures; `procedure_count` and `patient_count` are measures defined in the `procedure_occurrence` source.
 >>>malloy
 import 'omop.malloy'
 
@@ -18,26 +18,32 @@ run: procedure_occurrence -> {
 }
 >>>markdown
 
-## Procedures by patient age and gender
+## Top procedures by age band
 
-Grouping by `person.age_band` and `person.gender.concept_name` traverses the join to demographic dimensions naturally. Malloy understands that both dimensions come from the same person row, avoiding the SQL pattern of multiple JOINs and careful NULL handling.
+A raw count by demographics only tells you which age band is largest. The useful question is *which* procedures each band receives. `nest:` runs a sub-query inside each `age_band` group, so every row carries its own ranked procedure list - Malloy's nested results, in place of a separate query per band.
+
+The mix shifts with age: the 65+ band is dominated by cardiac procedures (echocardiography, cardioversion, catheter ablation), while the youngest band leans to acute and respiratory care (chest X-ray, oxygen administration) from the COVID cohort. `patient_count` is a distinct count, so a procedure repeated on one patient counts once.
+
+(`age_band` here is the model's *current*-age dimension. A strict age-at-procedure view would derive the age from `procedure_date`, the way `prevalence.malloynb` does for diagnosis; current age is kept here for simplicity.)
 >>>malloy
 run: procedure_occurrence -> {
-  group_by:
-    person.age_band
-    person.gender.concept_name
-  aggregate:
-    procedure_count
-    patient_count
+  group_by: person.age_band
+  aggregate: patient_count
+  nest: top_procedures is {
+    top: 3
+    group_by: procedure_concept.concept_name
+    aggregate: patient_count
+    order_by: patient_count desc
+  }
 }
 >>>markdown
 
 ## Procedures co-occurring with a condition
 
-Starting from `patient` and filtering by a condition, then grouping by procedures, shows Malloy's symmetric aggregates: both conditions and procedures are join-many under patient, but `procedures.patient_count` is correctly unsummarized without fan-out. In SQL, this fan-out problem requires careful subqueries or aggregate logic.
+Start from `patient`, filter by a condition, group by procedure. Conditions and procedures are both join-many under patient, but `procedures.patient_count` counts distinct patients per procedure without fan-out - symmetric aggregates again.
 >>>malloy
 run: patient -> {
-  where: conditions.condition_concept.concept_name ~ r'(?i)osteoarthritis'
+  where: conditions.condition_concept.concept_name = 'Coronary arteriosclerosis'
   group_by: procedures.procedure_concept.concept_name
   aggregate:
     procedure_count is procedures.procedure_count
@@ -49,24 +55,26 @@ run: patient -> {
 
 ## Patients with multiple procedures
 
-The two-stage pipeline (`->`) first groups by patient to calculate their total procedure count, then re-aggregates to show how many patients fall into each count bucket. This avoids the SQL anti-pattern of grouping by a measure; the pipeline makes the intent clear: aggregate, then analyze the result.
+This builds the distribution of procedure volume per patient: one row per distinct procedure count, showing how many patients had exactly that many procedures. It tells you the shape of utilization across the cohort - most patients have few procedures, with a long tail of heavy users.
+
+The query runs in two stages. First group by patient to get each one's total procedure count, then group again to bucket patients by that count. The two stages keep "aggregate, then analyze" explicit - you can't group by a measure in a single pass.
 >>>malloy
 run: patient -> {
   group_by: person_id
-  aggregate: my_procedure_count is total_procedures
+  aggregate: procedure_count is total_procedures
 } -> {
-  group_by: my_procedure_count
+  group_by: procedure_count
   aggregate: patient_count is count()
-  order_by: my_procedure_count
+  order_by: procedure_count
 }
 >>>markdown
 
 ## Procedure timeline per patient
 
-Grouping by `procedure_date` creates a chronological sequence, showing the exact order and frequency of procedures for a patient. Date grouping in Malloy is automatic - no manual date extraction needed like in SQL.
+For one patient (`person_id = 1813`, an example - pick any id), group by `procedure_date` to list their procedures in date order.
 >>>malloy
 run: procedure_occurrence -> {
-  where: person_id = 1
+  where: person_id = 1813
   group_by: procedure_date, procedure_concept.concept_name
   aggregate: procedure_count is count()
   order_by: procedure_date

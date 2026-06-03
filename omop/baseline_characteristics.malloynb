@@ -1,0 +1,273 @@
+>>>markdown
+# Baseline Characteristics Table (Table 1)
+
+Almost every observational study opens with when is known as a "Table 1": a structured summary of
+the study cohort, usually **stratified by an exposure or outcome group** so the
+reader can compare the groups side by side.
+
+In our example we have a cohort of 964 patients with a COVID-19 diagnosis (drawn from the
+10,754-patient Synthea COVID-19 sample), stratified by **vital status - died vs
+survived** - using the OMOP `death` table: 916 survived, 48 died. 
+
+This is the comparison that drove much of the early COVID literature: who dies, and how do
+they differ at baseline?
+
+## What this Table 1 includes
+
+- **Demographics**: count, age at the COVID index date (mean ± SD), sex, race,
+  ethnicity, age-band distribution.
+- **Follow-up**: mean observation-period length.
+- **Healthcare utilization**: mean visits per patient.
+- **Comorbidities & complications**: the conditions recorded for each group,
+  with the differences that separate survivors from deaths.
+- **Medications**: the drugs most commonly recorded in each group.
+
+\> Recall that this synthetic extract has no laboratory results (the OMOP `measurement`
+\> table is empty), so lab-based rows (e.g. mean CRP, D-dimer) that a real Table 1
+\> would include are omitted. 
+
+## Why Malloy for "Table 1"
+
+**In SQL**, this stratified Table 1 needs: a CTE for the index event (window
+function over `condition_start_date`), a join to the `death` table for the
+outcome, separate subqueries for demographics, age distribution, comorbidities,
+and medications, and pivot logic to lay the groups side by side.
+
+In this notebook we demonstrate how this works with Malloy for three tables: 
+*demographics*, *comorbidity* and *medication*. 
+The clinical logic lives in `omop.malloy` once and is reused across every
+notebook, so a Table 1 here reads the same as a Table 1 for any other cohort —
+change the index condition and rerun.
+>>>markdown
+## Demographics Table 1: cohort stratified by vital status
+
+This is the typical layout used in medical journal papers: characteristics down the left as rows,
+the two outcome groups (**Survived** / **Died**) as the columns. 
+
+First, we define the `covid_cohort` as a source, so every step can reuse it: one row per COVID-19 patient, with the values we summarize already attached.
+
+\> Note that computing age at the index date (not "age today") matters: the deceased cohort is much older at diagnosis, which a simple `year(now) - year_of_birth` would hide.
+>>>malloy
+import 'omop.malloy'
+
+source: covid_cohort is condition_occurrence -> {
+  // Index event: each patient's first COVID-19 diagnosis.
+  where: condition_concept.concept_name = 'COVID-19'
+  group_by: person_id
+  aggregate: index_date is condition_start_date.min()
+} -> {
+  // One row per patient: outcome group + the values Table 1 summarizes.
+  join_one: patient with person_id
+  group_by:
+    person_id
+    vital_status is patient.vital_status
+    age_at_index is year(index_date) - patient.year_of_birth
+    sex is patient.gender.concept_name
+    race is patient.race.concept_name
+    ethnicity is patient.ethnicity.concept_name
+    age_band is (year(index_date) - patient.year_of_birth) ?
+      pick '0-17'  when < 18
+      pick '18-49' when < 50
+      pick '50-64' when < 65
+      pick '65-74' when < 75
+      else '75+'
+  aggregate:
+    n_visits is patient.total_visits
+    followup_years is patient.observation_period.followup_years.avg()
+}
+>>>markdown
+### Step 1 — pivot one variable into Survived / Died columns
+
+Malloy has no `PIVOT`, but a *filtered aggregate* does the same job: count once
+per outcome group. `count() { where: vital_status = 'Survived' }` and its `'Died'`
+twin become the two columns; `group_by: sex` gives the rows. That is the whole
+trick — everything below just repeats it for more variables.
+>>>malloy
+run: covid_cohort -> {
+  group_by: sex
+  aggregate:
+    Survived is count() { where: vital_status = 'Survived' }
+    Died is count() { where: vital_status = 'Died' }
+}
+>>>markdown
+### Step 2 — stack many variables into one column (wide → long)
+
+A real Table 1 puts sex, race, ethnicity and age band in the *same* left column.
+Those are different fields, so we reshape wide → long: unnest a small array
+literal (`line`) so each patient emits one row per characteristic. 
+
+This is Malloy's stand-in for SQL `UNPIVOT`. 
+
+Then the same Step 1 pivot produces the Survived / Died counts — now for every characteristic at once.
+>>>malloy
+run: covid_cohort -> {
+  extend: {
+    dimension: line is [
+      {section is 'Sex',       level is sex},
+      {section is 'Race',      level is race},
+      {section is 'Ethnicity', level is ethnicity},
+      {section is 'Age band',  level is age_band}
+    ]
+  }
+  group_by: person_id, vital_status, section is line.section, level is line.level
+} -> {
+  limit: 100
+  order_by: Characteristic, Subgroup
+  group_by: Characteristic is section, Subgroup is level
+  aggregate:
+    Survived is count() { where: vital_status = 'Survived' }
+    Died is count() { where: vital_status = 'Died' }
+}
+>>>markdown
+### Step 3 — the finished Table 1
+
+Three additions turn Step 2 into a publishable table:
+- **Percent within column** — `exclude(count() { … }, level)` is the section's
+  column total (all survivors / all deaths), the denominator for each `n (%)`.
+- **Continuous rows** — patient count, mean age, visits, follow-up. They ride the
+  same `line` array (with an `ord` to keep sections in order); each is a count or
+  mean rather than a category breakdown, so its `level` is blank.
+- **One format per line** — continuous lines read `mean (SD)`, categorical lines
+  read `n (%)`. A `pick` chooses per row.
+
+That last point is why the query grows to three stages: reshape, then one stage
+that computes *every* candidate statistic (counts, means, SDs, column totals),
+then a formatting stage — `pick` can only run once the aggregates exist, so it
+gets its own stage. (`ord` just orders rows and selects the format, so it is
+hidden from the result.)
+
+The contrast reads straight down the page: the deceased are older (81.5 vs 44.6),
+more male (68.8% vs 47.4%), and 79.2% are 75+ vs 0% under 18.
+>>>malloy
+run: covid_cohort -> {
+  // Reshape wide -> long; the continuous lines (ord 1-4) carry an empty level.
+  extend: {
+    dimension: line is [
+      {ord is 1, section is 'Patients — no. (%)',           level is ''},
+      {ord is 2, section is 'Age at index — yr, mean (SD)', level is ''},
+      {ord is 3, section is 'Visits per patient — mean',    level is ''},
+      {ord is 4, section is 'Follow-up — yr, mean',         level is ''},
+      {ord is 5, section is 'Sex — no. (%)',                level is sex},
+      {ord is 6, section is 'Race — no. (%)',               level is race},
+      {ord is 7, section is 'Ethnicity — no. (%)',          level is ethnicity},
+      {ord is 8, section is 'Age band — no. (%)',           level is age_band}
+    ]
+  }
+  group_by:
+    person_id, vital_status, age_at_index, n_visits, followup_years
+    ord is line.ord
+    section is line.section
+    level is line.level
+} -> {
+  // One row per Table 1 line; compute every candidate statistic.
+  // exclude(..., level) is the section's column total (the n (%) denominator).
+  group_by: ord, section, level
+  aggregate:
+    surv_n is count() { where: vital_status = 'Survived' }
+    died_n is count() { where: vital_status = 'Died' }
+    surv_col is exclude(count() { where: vital_status = 'Survived' }, level)
+    died_col is exclude(count() { where: vital_status = 'Died' }, level)
+    all_col  is exclude(count(), level)
+    age_surv_m  is round(age_at_index.avg()    { where: vital_status = 'Survived' }, 1)
+    age_surv_sd is round(age_at_index.stddev() { where: vital_status = 'Survived' }, 1)
+    age_died_m  is round(age_at_index.avg()    { where: vital_status = 'Died' }, 1)
+    age_died_sd is round(age_at_index.stddev() { where: vital_status = 'Died' }, 1)
+    vis_surv is round(n_visits.avg()       { where: vital_status = 'Survived' }, 1)
+    vis_died is round(n_visits.avg()       { where: vital_status = 'Died' }, 1)
+    fu_surv  is round(followup_years.avg() { where: vital_status = 'Survived' }, 1)
+    fu_died  is round(followup_years.avg() { where: vital_status = 'Died' }, 1)
+} -> {
+  // Format: pick mean (SD) for continuous lines, n (%) for categorical.
+  limit: 100
+  order_by: ord, Subgroup
+  group_by:
+    # hidden
+    ord
+    Characteristic is section
+    Subgroup is level
+    Survived is
+      pick concat(age_surv_m::string, ' (', age_surv_sd::string, ')') when ord = 2
+      pick vis_surv::string when ord = 3
+      pick fu_surv::string when ord = 4
+      pick concat(surv_n::string, ' (', round(surv_n / all_col  * 100, 1)::string, '%)') when ord = 1
+      else concat(surv_n::string, ' (', round(surv_n / surv_col * 100, 1)::string, '%)')
+    Died is
+      pick concat(age_died_m::string, ' (', age_died_sd::string, ')') when ord = 2
+      pick vis_died::string when ord = 3
+      pick fu_died::string when ord = 4
+      pick concat(died_n::string, ' (', round(died_n / all_col  * 100, 1)::string, '%)') when ord = 1
+      else concat(died_n::string, ' (', round(died_n / died_col * 100, 1)::string, '%)')
+}
+>>>markdown
+## Comorbidities and complications by vital status
+
+In this example, we generate the same Table 1 layout, but with each comorbidity as a row: the share of **survivors**
+(n=916) vs **deaths** (n=48) who had it. The contrast is the point - mild symptoms
+(fever, cough) are common in both, but the severe complications (pneumonia,
+respiratory distress, hypoxemia) jump from ~13% of survivors to ~90% of deaths.
+
+The pivot is the Step 1 trick (filtered `count()` per outcome) applied to one
+variable, the comorbidity. Two details: the `count()` is a *symmetric aggregate*,
+correct per patient even though `patient.conditions` fans out; and because a
+patient has *many* conditions, the `n (%)` denominator can't come from the rows
+the way it did for demographics — `all(count() { … })` counts each column's whole
+cohort instead. We keep the COVID-19 row in the scan so patients with no other
+condition still count toward that total, then drop it before ranking the top
+comorbidities.
+>>>malloy
+run: condition_occurrence -> {
+  where: condition_concept.concept_name = 'COVID-19'
+  group_by: person_id
+} -> {
+  // grain = COVID patients; fan to every recorded condition (incl. COVID-19 so
+  // patients with no other condition still count toward the cohort total).
+  join_one: patient with person_id
+  group_by: comorbidity is patient.conditions.condition_concept.concept_name
+  aggregate:
+    surv is count() { where: patient.vital_status = 'Survived' }
+    died is count() { where: patient.vital_status = 'Died' }
+    surv_cohort is all(count() { where: patient.vital_status = 'Survived' })
+    died_cohort is all(count() { where: patient.vital_status = 'Died' })
+} -> {
+  // Drop the COVID-19 index row; keep the top comorbidities by total patients.
+  where: comorbidity != 'COVID-19'
+  order_by: total desc
+  limit: 10
+  group_by:
+    # hidden
+    total is surv + died
+    Characteristic is comorbidity
+    Survived is concat(surv::string, ' (', round(surv / surv_cohort * 100, 1)::string, '%)')
+    Died is concat(died::string, ' (', round(died / died_cohort * 100, 1)::string, '%)')
+}
+>>>markdown
+## Medications by vital status
+
+This third example uses the same pivot idea, here computing the share of survivors vs deaths who received each drug.
+Vaccines sit near the top for both groups (background care), but the acute-care drugs separate the columns 
+sharply - acetaminophen (13% → 90%) and enoxaparin (anticoagulation for COVID-related thrombosis, 13% → 77%) track severe disease.
+Every COVID patient has at least one drug, so `all(count() { … })` is the full cohort total (916 / 48) with no index row to keep.
+>>>malloy
+run: condition_occurrence -> {
+  where: condition_concept.concept_name = 'COVID-19'
+  group_by: person_id
+} -> {
+  join_one: patient with person_id
+  group_by: drug is patient.drugs.drug_concept.concept_name
+  aggregate:
+    surv is count() { where: patient.vital_status = 'Survived' }
+    died is count() { where: patient.vital_status = 'Died' }
+    surv_cohort is all(count() { where: patient.vital_status = 'Survived' })
+    died_cohort is all(count() { where: patient.vital_status = 'Died' })
+} -> {
+  order_by: total desc
+  limit: 10
+  group_by:
+    # hidden
+    total is surv + died
+    Characteristic is drug
+    Survived is concat(surv::string, ' (', round(surv / surv_cohort * 100, 1)::string, '%)')
+    Died is concat(died::string, ' (', round(died / died_cohort * 100, 1)::string, '%)')
+}
+>>>malloy
+

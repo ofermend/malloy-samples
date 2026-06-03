@@ -1,48 +1,72 @@
 >>>markdown
 # Defining Patient Cohorts
 
-In OHDSI research, a "cohort" is a set of patients who meet specific clinical criteria - e.g. *adults with a chronic respiratory condition who were prescribed an antibiotic*. Cohort definition is the first step of almost every observational study.
+In OHDSI research, a "cohort" is a set of patients who meet specific clinical
+criteria - e.g. *patients with coronary artery disease who were prescribed an
+antiplatelet*. Cohort definition is the first step of almost every observational
+study.
 
-This notebook shows how to express cohort logic in Malloy using the `patient` source's join_many's to `conditions` and `drugs`.
+This notebook shows how to express cohort logic in Malloy using the `patient`
+source's join_many's to `conditions` and `drugs`.
 
-The first query filters patients by condition and shows demographics. The `where:` clause traverses through the `conditions` join-many to find patients with sinusitis. The `->` operator pipes to aggregation; `group_by: age_band` uses a dimension already computed in the model. Malloy avoids the SQL pattern of nested GROUP BY after JOINs because the join cardinality is already encoded.
+The first query keeps patients with a condition, then summarizes them. The
+`where:` clause reaches through the `conditions` join-many to select coronary
+arteriosclerosis patients; `-> { group_by: age_band }` aggregates them by the
+model's age-band dimension. The join cardinality is encoded in the model, so the
+per-patient counts come out right without a hand-written GROUP BY.
 >>>malloy
 import 'omop.malloy'
 
-# bar_chart
 run: patient -> {
-  where: conditions.condition_concept.concept_name ~ r'(?i)sinusitis'
+  where: conditions.condition_concept.concept_name = 'Coronary arteriosclerosis'
   group_by: age_band
   aggregate:
     cohort_size is person_count
     avg_visits is total_visits / person_count
+  order_by: age_band
 }
 >>>markdown
 ## Adding a drug-exposure criterion
 
-Combine multiple `where:` clauses - Malloy ANDs them. The cohort now requires both a sinusitis diagnosis *and* a recorded amoxicillin prescription. Each `where:` clause independently traverses its join path (conditions and drugs), and Malloy correctly handles the fact that both are join-many relationships under patient. In SQL this would be a `JOIN ... INNER JOIN ... WHERE` with careful handling of grouping; in Malloy it's just multiple where clauses.
+Combine multiple `where:` clauses - Malloy ANDs them. This cohort requires both a
+coronary arteriosclerosis diagnosis *and* a clopidogrel (antiplatelet) prescription
+(`~ r'(?i)clopidogrel'` is a case-insensitive regex match, since one ingredient
+spans many branded names). Each clause traverses its own join path - conditions
+and drugs, both join-many under patient - and the counts stay correct.
 >>>malloy
 run: patient -> {
   where:
-    conditions.condition_concept.concept_name ~ r'(?i)sinusitis',
-    drugs.drug_concept.concept_name ~ r'(?i)amoxicillin'
+    conditions.condition_concept.concept_name = 'Coronary arteriosclerosis',
+    drugs.drug_concept.concept_name ~ r'(?i)clopidogrel'
   group_by: gender.concept_name, age_band
   aggregate: cohort_size is person_count
+  order_by: age_band
 }
 >>>markdown
 ## Cohort co-morbidity drill-down
 
-Nest a query under each row to see what *other* conditions cohort members carry. This is the classic OHDSI "comorbidity table" - one Malloy query, no joins or subqueries to hand-write. The `nest:` keyword embeds a sub-aggregation per group; in SQL you'd need a CTE or a separate correlated subquery for each cohort group.
+The classic OHDSI "comorbidity table": for a cohort, what *other* conditions do
+the members carry? Define the cohort in the first stage (patients with COVID-19),
+then in the second stage look at each member's full condition history and nest the
+top comorbidities.
 
-The query first filters to osteoarthritis patients, then nests a sub-query that shows the top 5 other conditions they carry. The nested query runs independently for the outer group context, automatically respecting the patient filtering.
+Splitting the cohort definition and the comorbidity scan into two stages matters:
+if you instead filtered `conditions` to COVID-19 *and* tried to list other
+conditions in the same scope, the filter would also hide those other conditions.
+Defining the cohort first (a list of `person_id`s), then joining back to the full
+`patient`, keeps the comorbidity scan unfiltered.
 >>>malloy
-run: patient -> {
-  where: conditions.condition_concept.concept_name ~ r'(?i)osteoarthritis'
-  aggregate: cohort_size is person_count
+run: condition_occurrence -> {
+  where: condition_concept.concept_name = 'COVID-19'
+  group_by: person_id
+} -> {
+  join_one: patient with person_id
+  aggregate: cohort_size is count()
   nest: top_comorbidities is {
-    top: 5
-    where: conditions.condition_concept.concept_name !~ r'(?i)osteoarthritis'
-    group_by: comorbidity is conditions.condition_concept.concept_name
-    aggregate: affected_patients is conditions.patient_count
+    where: patient.conditions.condition_concept.concept_name != 'COVID-19'
+    group_by: comorbidity is patient.conditions.condition_concept.concept_name
+    aggregate: affected_patients is patient.conditions.patient_count
+    order_by: affected_patients desc
+    limit: 8
   }
 }

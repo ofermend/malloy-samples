@@ -1,0 +1,132 @@
+>>>markdown
+# Cohort Analysis with Outcomes and Follow-up
+
+A core OHDSI pattern: define a cohort at an **index event** (here, a patient's
+first COVID-19 diagnosis), then **follow forward in time** to measure outcomes.
+The outcome we care about most for COVID is **mortality** - available in this
+dataset through the OMOP `death` table.
+
+In SQL this longitudinal pattern needs CTEs, window functions, and correlated
+subqueries. In Malloy it is a pipeline: define the index event in one stage, then
+join each patient to their outcome through the semantic model.
+
+## Index event: first COVID-19 diagnosis, then cohort entry by year
+
+Two stages. **Stage 1** collapses each patient's COVID-19 records to their
+earliest one - the cohort entry ("index") date. `group_by: person_id` with
+`min(condition_start_date)` gives exactly one index row per patient, no window
+function. Every later query in this notebook reuses this same stage.
+
+**Stage 2** profiles when patients entered the cohort, grouping the index dates
+by `year(index_date)`. The result is cohort accrual per year: the records span
+2020-2021, so you see how the cohort grew across both years.
+>>>malloy
+import 'omop.malloy'
+
+run: condition_occurrence -> {
+  where: condition_concept.concept_name = 'COVID-19'
+  group_by: person_id
+  aggregate: index_date is condition_start_date.min()
+} -> {
+  group_by: index_year is year(index_date)
+  aggregate: cohort_members is count()
+  order_by: index_year
+}
+>>>markdown
+## Cohort entry by month
+
+The same index cohort, bucketed by calendar month instead of year. `index_date.month`
+truncates each index date to the first of its month (keeping the year), so the
+cohort becomes a monthly time series - an epidemic curve. The COVID waves show
+up clearly: the counts build to a peak in late 2020/early 2021. Month is the
+useful granularity here - grouping by exact date would scatter the counts too
+thin to read, while year hides the wave.
+>>>malloy
+run: condition_occurrence -> {
+  where: condition_concept.concept_name = 'COVID-19'
+  group_by: person_id
+  aggregate: index_date is condition_start_date.min()
+} -> {
+  group_by: index_month is index_date.month
+  aggregate: patients_with_covid is count()
+  order_by: index_month
+  limit: 20
+}
+>>>markdown
+## Mortality by age at diagnosis
+
+Does death rate rises steeply with age at diagnosis?
+
+Here the second stage joins each cohort member to `patient` (which carries the `death`
+join), so `death_count / count()` is the mortality rate within each age band.
+
+As you can see with Malloy thish is computed in one pass, no separate "numerator" and "denominator" queries.
+>>>malloy
+run: condition_occurrence -> {
+  where: condition_concept.concept_name = 'COVID-19'
+  group_by: person_id
+  aggregate: index_date is condition_start_date.min()
+} -> {
+  join_one: patient with person_id
+  group_by:
+    age_band is (year(index_date) - patient.year_of_birth) ?
+      pick '0-17'  when < 18
+      pick '18-49' when < 50
+      pick '50-64' when < 65
+      pick '65-74' when < 75
+      else '75+'
+  aggregate:
+    cohort is count()
+    deaths is patient.death_count
+    mortality_pct is round(patient.death_count / count() * 100, 1)
+  order_by: age_band
+}
+>>>markdown
+## Mortality by race
+
+The same outcome stratified by race - the kind of disparities analysis that
+real-world COVID studies ran. Because the cohort, the demographics, and the
+`death` outcome all flow from the shared model, switching the stratifier is a
+one-line change.
+>>>malloy
+run: condition_occurrence -> {
+  where: condition_concept.concept_name = 'COVID-19'
+  group_by: person_id
+} -> {
+  join_one: patient with person_id
+  group_by: race is patient.race.concept_name
+  aggregate:
+    num_patients is count()
+    deaths is patient.death_count
+    mortality_pct is round(patient.death_count / count() * 100, 1)
+  order_by: num_patients desc
+}
+>>>markdown
+## Time from diagnosis to death
+
+For patients who died, let's measure the interval from their COVID index date to death. 
+
+We see that most deaths cluster within 30 days of diagnosis - the expected acute-mortality
+pattern. `days(index_date to death_date)` computes the interval per patient; the
+final stage buckets it into clinically meaningful windows.
+>>>malloy
+run: condition_occurrence -> {
+  where: condition_concept.concept_name = 'COVID-19'
+  group_by: person_id
+  aggregate: index_date is condition_start_date.min()
+} -> {
+  join_one: patient with person_id
+  where: patient.death.death_date != null
+  group_by:
+    person_id
+    days_to_death is days(index_date to patient.death.death_date)
+} -> {
+  group_by: outcome_window is days_to_death ?
+    pick 'Death before/at index' when <= 0
+    pick 'Within 30 days'        when <= 30
+    pick '31-90 days'            when <= 90
+    pick '91-365 days'           when <= 365
+    else 'After 1 year'
+  aggregate: deaths is count()
+  order_by: deaths desc
+}

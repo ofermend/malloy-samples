@@ -1,0 +1,82 @@
+>>>markdown
+# Healthcare Utilization
+
+How much care patients receive - visits, and their setting (outpatient, emergency,
+inpatient) - is a core descriptor in observational studies and a driver of cost
+and outcomes. The OMOP `visit_occurrence` table records one row per encounter,
+typed by `visit_concept_id`.
+
+\> This synthetic extract has no laboratory results (the OMOP `measurement` and
+\> `observation` tables are empty), so utilization here is built from visits,
+\> drugs, and procedures rather than labs or vitals.
+
+## Visits by setting
+
+The mix of care settings across the dataset. `visit_count` and `patient_count`
+are measures defined once in the model.
+>>>malloy
+import 'omop.malloy'
+
+run: visit_occurrence -> {
+  group_by: setting is visit_concept.concept_name
+  aggregate:
+    visit_count
+    patient_count
+  order_by: visit_count desc
+}
+>>>markdown
+## Visits per patient
+
+First compute each patient's visit count, then bucket patients by it. The two
+stages make "aggregate, then analyze" explicit - you can't group by an aggregate
+in a single pass.
+>>>malloy
+run: patient -> {
+  group_by: person_id
+  aggregate: visits_per_patient is total_visits
+} -> {
+  group_by: visits_per_patient
+  aggregate: patients is count()
+  order_by: visits_per_patient
+}
+>>>markdown
+## Care setting by age
+
+Older patients lean toward emergency and inpatient care. Group by
+`person.age_band` to reach demographics through the `person` join.
+>>>malloy
+run: visit_occurrence -> {
+  group_by:
+    setting is visit_concept.concept_name
+    person.age_band
+  aggregate: visit_count
+  order_by: setting, age_band
+  limit: 20
+}
+>>>markdown
+## Utilization in the COVID-19 cohort
+
+Mean visits, drugs, and procedures per patient for the COVID-19 cohort, split by
+vital status. The deceased cohort shows heavier utilization - more encounters and
+interventions around a severe illness. All three per-patient means come from the
+`patient` source's symmetric aggregates, so counting visits, drugs, and procedures
+together stays correct despite each fanning out from the patient.
+>>>malloy
+run: condition_occurrence -> {
+  where: condition_concept.concept_name = 'COVID-19'
+  group_by: person_id
+} -> {
+  join_one: patient with person_id
+  group_by: person_id, vital_status is patient.vital_status
+  aggregate:
+    visits is patient.total_visits
+    drugs is patient.total_drugs
+    procedures is patient.total_procedures
+} -> {
+  group_by: vital_status
+  aggregate:
+    cohort is count()
+    mean_visits is round(visits.avg(), 1)
+    mean_drugs is round(drugs.avg(), 1)
+    mean_procedures is round(procedures.avg(), 1)
+}

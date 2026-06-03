@@ -1,8 +1,16 @@
-# OMOP sample — data regeneration
+# OMOP sample — data download
 
-The OMOP sample uses the [OHDSI Eunomia GiBleed_5.3](https://github.com/OHDSI/EunomiaDatasets/tree/main/datasets/GiBleed) dataset, a curated synthetic OMOP CDM v5.3 dataset (~2,700 patients) used in the official OHDSI tutorials.
+The OMOP sample uses **`synthea-covid19-10k`**: an OMOP CDM v5.3 synthetic dataset
+of ~10,700 patients generated with [Synthea](https://github.com/synthetichealth/synthea)'s
+COVID-19 module and the [ETL-Synthea](https://github.com/OHDSI/ETL-Synthea) pipeline,
+distributed by the OHDSI / darwin-eu community as a
+[CDMConnector](https://darwin-eu.github.io/CDMConnector/) example dataset.
 
-We do **not** commit the data to this repo. Run the setup script once to generate it locally:
+This dataset has real demographic diversity (race/ethnicity), a populated
+`death` table, and the full OMOP vocabulary — enough to build a realistic analysis example. 
+It has no lab results (`measurement`/`observation` are empty).
+
+We do **not** commit the data to this repo. Run the setup script once:
 
 ```bash
 bash omop/scripts/setup.sh
@@ -10,20 +18,22 @@ bash omop/scripts/setup.sh
 
 ## What the script does
 
-1. Downloads `GiBleed_5.3.zip` (~6.5 MB) from the OHDSI `EunomiaDatasets` GitHub repository.
-2. Unzips into a temporary directory.
-3. Runs `build_parquet.py` to convert each CSV to ZSTD-compressed Parquet, lowercase column names, and drop tables that are empty in the Eunomia release.
-4. Writes the Parquet files to `omop/data/` (gitignored).
+1. Downloads `synthea-covid19-10k_5.3.zip` (~840 MB) from the CDMConnector
+   example-data Azure blob (public, no account needed).
+2. Extracts only the tables the Malloy model uses (the files are already Parquet,
+   so there is no conversion step):
 
-## Tables produced
+   ```
+   person, condition_occurrence, drug_exposure, visit_occurrence,
+   procedure_occurrence, observation_period, death, concept, vocabulary, domain
+   ```
 
-```
-person, observation_period, visit_occurrence, condition_occurrence,
-drug_exposure, procedure_occurrence, measurement, observation, death,
-concept, concept_ancestor, vocabulary, domain
-```
-
-Total disk footprint is ~4 MB across 13 files.
+   The ~1 GB of vocabulary tables the sample never queries
+   (`concept_ancestor`, `concept_relationship`, `concept_synonym`,
+   `drug_strength`) and unused clinical tables are skipped.
+3. Writes the Parquet files to `omop/data/` (gitignored). Footprint ~195 MB,
+   dominated by the full `concept` table (kept so `vocabulary_explorer.malloynb`
+   can search the real vocabulary).
 
 ## Regenerating from scratch
 
@@ -34,11 +44,4 @@ bash omop/scripts/setup.sh
 
 ## Requirements
 
-- `curl` and `unzip` (standard on macOS/Linux)
-- `python3` 3.10+ with `pip`, or [`uv`](https://docs.astral.sh/uv/) (the script auto-detects)
-
-No Java required.
-
-## Why Eunomia and not Synthea?
-
-We considered generating data with [Synthea](https://github.com/synthetichealth/synthea), but the current Synthea releases do not include a native OMOP CDM exporter — converting Synthea output to OMOP requires the [ETL-Synthea](https://github.com/OHDSI/ETL-Synthea) R package or equivalent, which adds a heavy dependency. Eunomia is the canonical OHDSI-distributed sample for OMOP, pre-built and well-cited in the OHDSI community.
+- `curl` and `unzip` (standard on macOS/Linux). No Python, no Java.

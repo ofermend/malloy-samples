@@ -1,56 +1,54 @@
 #!/usr/bin/env bash
-# Generate the OMOP sample dataset on demand.
+# Download the OMOP sample dataset on demand.
 #
-# Downloads the OHDSI Eunomia GiBleed_5.3 dataset (~6.5 MB zip, ~25 MB
-# unpacked) and converts the CSVs to ZSTD-compressed Parquet under
-# omop/data/. Eunomia is a curated, OHDSI-distributed OMOP CDM v5.3
-# sample dataset used in the official OHDSI tutorials.
+# Uses the 'synthea-covid19-10k' dataset: an OMOP CDM v5.3 synthetic dataset of
+# ~10,700 patients built with Synthea's COVID-19 module and ETL-Synthea, then
+# distributed by the OHDSI/darwin-eu community as a CDMConnector example dataset.
+# It includes real demographic diversity (race/ethnicity), a populated death
+# table, and the full OMOP vocabulary. No PHI.
+#
+# The source is a single ~840 MB zip. Most of that is full OMOP vocabulary tables
+# this sample never queries (concept_ancestor, concept_relationship, etc.), so we
+# extract only the tables the Malloy model uses (~195 MB on disk). The files are
+# already Parquet — no conversion step.
 #
 # Run once from the repo root:
 #   bash omop/scripts/setup.sh
 #
-# Re-run after `rm -rf omop/data/` if you want to regenerate.
+# Re-run after `rm -rf omop/data/` to regenerate.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
-EUNOMIA_URL="https://raw.githubusercontent.com/OHDSI/EunomiaDatasets/main/datasets/GiBleed/GiBleed_5.3.zip"
+DATASET="synthea-covid19-10k"
+URL="https://cdmconnectordata.blob.core.windows.net/cdmconnector-example-data/${DATASET}_5.3.zip"
 WORK_DIR="$(mktemp -d -t omop-build-XXXXXX)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
-command -v curl >/dev/null 2>&1 || {
-  echo "ERROR: curl is required." >&2; exit 1; }
-command -v unzip >/dev/null 2>&1 || {
-  echo "ERROR: unzip is required." >&2; exit 1; }
-command -v uv >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1 || {
-  echo "ERROR: python3 or uv is required for the Parquet conversion step." >&2; exit 1; }
+command -v curl >/dev/null 2>&1 || { echo "ERROR: curl is required." >&2; exit 1; }
+command -v unzip >/dev/null 2>&1 || { echo "ERROR: unzip is required." >&2; exit 1; }
+
+# Only the tables the Malloy model references. The remaining vocabulary tables
+# (concept_ancestor/relationship/synonym, drug_strength) and unused clinical
+# tables (provider, visit_detail, cost, payer_plan_period, ...) are skipped.
+TABLES=(person condition_occurrence drug_exposure visit_occurrence \
+        procedure_occurrence observation_period death \
+        concept vocabulary domain)
 
 mkdir -p omop/data
+rm -f omop/data/*.parquet
 
-echo "Downloading Eunomia GiBleed 5.3 dataset ..."
-curl -fSL --retry 3 --retry-all-errors --retry-connrefused -o "$WORK_DIR/eunomia.zip" "$EUNOMIA_URL"
+echo "Downloading ${DATASET} (~840 MB) ..."
+curl -fSL --retry 3 --retry-all-errors --retry-connrefused -o "$WORK_DIR/data.zip" "$URL"
 
-echo "Unpacking ..."
-unzip -q "$WORK_DIR/eunomia.zip" -d "$WORK_DIR"
-CSV_DIR="$WORK_DIR/GiBleed_5.3"
+echo "Extracting the ${#TABLES[@]} tables this sample uses ..."
+MEMBERS=()
+for t in "${TABLES[@]}"; do MEMBERS+=("${DATASET}/${t}.parquet"); done
+unzip -oq "$WORK_DIR/data.zip" "${MEMBERS[@]}" -d "$WORK_DIR"
 
-if [[ ! -d "$CSV_DIR" ]]; then
-  echo "ERROR: expected $CSV_DIR after unzip; found:" >&2
-  ls -la "$WORK_DIR" >&2
-  exit 1
-fi
-
-echo "Converting CSV → ZSTD Parquet ..."
-if command -v uv >/dev/null 2>&1; then
-  uv run --quiet omop/scripts/build_parquet.py \
-    --source "$CSV_DIR" --target omop/data
-else
-  python3 -m pip install --quiet duckdb >/dev/null
-  python3 omop/scripts/build_parquet.py \
-    --source "$CSV_DIR" --target omop/data
-fi
+mv "$WORK_DIR/${DATASET}"/*.parquet omop/data/
 
 echo ""
 echo "Done. Files in omop/data/:"

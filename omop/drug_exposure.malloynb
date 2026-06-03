@@ -1,12 +1,12 @@
 >>>markdown
 # Drug Exposure Analysis
 
-Two ideas in one notebook:
+Two examples of analysis in this notebook:
 
-1. **Top drugs** with prescribing volume and average days-supply
-2. **Drug ↔ condition co-occurrence** - for every top drug, count distinct conditions diagnosed for the same patients. This is where Malloy's **symmetric aggregates** shine: counting drugs and counting conditions through different join paths from the same `patient` root produces correct numbers without fan-out.
+1. Top drugs by prescribing volume, with exposures per patient
+2. Drug/condition co-occurrence - for every top drug, count distinct conditions diagnosed for the same patients. Counting drugs and conditions through different join paths from one `patient` root is the case *symmetric aggregates* handle: both counts stay correct without fan-out.
 
-The first query uses `top: 10` to limit results and `group_by` on drug name with named measures. In Malloy, measures like `exposure_count`, `patient_count`, and `avg_days_supply` are pre-defined in the source, so you just reference them by name without recalculating.
+`exposure_count` and `patient_count` are measures defined in the `drug_exposure` source; this first query references them by name and derives exposures-per-patient from the two.
 >>>malloy
 import 'omop.malloy'
 
@@ -16,34 +16,40 @@ run: drug_exposure -> {
   aggregate:
     exposure_count
     patient_count
-    avg_days_supply
+    exposures_per_patient is round(exposure_count / patient_count, 1)
+  order_by: exposure_count desc
 }
 >>>markdown
 ## Drug-condition co-occurrence with symmetric aggregates
 
-For each top drug, count distinct conditions across the patients who received it. This is a classic OMOP multi-fact problem: you're counting two different event tables through the same patient root, which causes fan-out in SQL (each condition row multiplies the drug count). Malloy's symmetric aggregates solve this by understanding the join structure: `conditions.count()` and `drugs.count()` are both correct independently, even though both join-many under `patient`. In SQL this would require careful subqueries or aggregation logic; in Malloy it's a single nested expression.
+For each of the top drugs, this counts three things at once - the distinct patients who took it, its drug records, and the condition records those patients carry - each through a different path from one `patient` root.
 
-The query starts from `patient` (not from `drug_exposure`). It filters to a specific drug and then counts conditions — which live independently of the drug join-many. The expression `conditions.count()` traverses the join graph correctly and returns distinct conditions per drug, without double-counting.
+That is the case symmetric aggregates exist for. In SQL, counting two event tables through the same patient fans out: each condition row multiplies the drug rows, so a naive `COUNT` of conditions is inflated by the number of drug records (and vice versa). Malloy keeps each correct: `drugs.count()` and `conditions.count()` both join-many under `patient`, yet neither inflates the other. Note `condition_records` is *not* multiplied by the drug fan-out - it's the real number of condition events for those patients.
+
+The query starts from `patient`, not `drug_exposure`, so all three counts share that single root.
 >>>malloy
 run: patient -> {
-  top: 10
-  where: drugs.drug_concept.concept_name ~ r'(?i)acetaminophen'
+  top: 8
   group_by: drugs.drug_concept.concept_name
   aggregate:
     drug_users is person_count
-    // distinct conditions across these patients - note this is `conditions.count()`,
-    // not `drugs.conditions.count()`. Conditions live one join-hop away from person,
-    // independent of drugs. The fan-out is correct by construction.
-    distinct_conditions is conditions.count()
+    drug_records is drugs.count()
+    condition_records is conditions.count()
+  order_by: drug_users desc
 }
 >>>markdown
-## Distribution of days-supply
+## Exposures per patient
 
-Show the spread of prescription lengths for a single drug. Grouping by `days_supply` creates natural histogram buckets. The `where:` clause filters to the drug of interest, and `order_by: days_supply` sorts the buckets for readability.
+This shows how many times each patient on a given drug was prescribed it - the distribution of prescription counts across the cohort. For a chronic-use drug like clopidogrel most patients have several exposures, tapering off as the count rises.
+
+The query runs in two stages. First group by `person_id` to get each patient's exposure count, then group again to bucket patients by that count. The two stages keep "aggregate, then analyze" explicit - you can't group by a measure in a single pass. (`days_supply` would be the natural field for prescription *length*, but Synthea doesn't populate it in this extract, so we count exposures instead.)
 >>>malloy
 run: drug_exposure -> {
-  where: drug_concept.concept_name ~ r'(?i)amoxicillin'
-  group_by: days_supply
-  aggregate: exposure_count
-  order_by: days_supply
+  where: drug_concept.concept_name ~ r'(?i)clopidogrel'
+  group_by: person_id
+  aggregate: n_exposures is exposure_count
+} -> {
+  group_by: n_exposures
+  aggregate: patients is count()
+  order_by: n_exposures
 }
