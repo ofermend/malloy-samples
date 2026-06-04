@@ -14,9 +14,14 @@ you would actually use in a cohort.
 
 ## Find a condition
 
-Conditions live in the `Condition` domain. `concept_name ~ r'(?i)covid'` is a
-case-insensitive regex match (`~` matches a pattern, `(?i)` ignores case). Search
-for COVID-related standard concepts:
+This returns the standardized concepts whose name matches "covid" in the
+`Condition` domain - the candidates you'd filter on in a cohort query.
+`domain_id` picks the clinical area; `concept_name ~ r'(?i)covid'` is a
+case-insensitive regex match (`~` matches a pattern, `(?i)` ignores case);
+`standard_concept = 'S'` keeps only *standard* concepts. (OMOP distinguishes
+standard concepts - the ones fact tables are mapped to - from source codes like
+ICD-10, which map *into* them. Filter on a source code and you'll miss patients
+recorded under a different one, so cohorts use standard concepts.)
 >>>malloy
 import 'omop.malloy'
 

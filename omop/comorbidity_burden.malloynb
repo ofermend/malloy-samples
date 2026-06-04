@@ -44,7 +44,6 @@ ordinal category in one step — no CASE ladder, no separate lookup table. Still
 mortality here: we just count how many patients land in each tier, which shows the
 cohort's shape (most have few comorbidities, a tail have many).
 >>>malloy
-# bar_chart
 run: condition_occurrence -> {
   where: condition_concept.concept_name = 'COVID-19'
   group_by: person_id
@@ -96,20 +95,3 @@ run: condition_occurrence -> {
     mortality_pct is round(count() { where: vital_status = 'Died' } / count() * 100, 1)
   order_by: burden_tier
 }
->>>markdown
-## Why Malloy for comorbidity scoring
-
-**In SQL** this needs: a join to conditions with a `COUNT(DISTINCT ...)` per
-patient, a CASE ladder to bucket the count, a join to the `death` table, and a
-`SUM(CASE WHEN died ...) / COUNT(*)` for the stratified rate — across several
-CTEs.
-
-**In Malloy** it is one model and a short pipeline:
-- The index cohort comes from `condition_occurrence`.
-- `count(field) { where: ... }` gives a filtered distinct count per patient.
-- A `pick` expression buckets the burden.
-- `count() { where: vital_status = 'Died' }` gives the mortality numerator inline.
-
-To turn this into a true weighted Charlson index, replace the plain count with a
-sum of per-condition weights keyed on standard `concept_id`s — the pipeline shape
-does not change.

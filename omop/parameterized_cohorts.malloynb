@@ -8,6 +8,14 @@ comorbidities, then reruns the *same* query shape for a different condition.
 The pattern: filter to a condition, aggregate demographics, identify common
 comorbidities. Changing only the `where` clause re-targets the whole analysis -
 no duplicated logic.
+
+## A cohort's demographic profile
+
+The starting point: who is in the COVID-19 cohort, broken down by age band and
+sex. Filtering `conditions` on the `patient` source keeps the patient as the unit
+of analysis, so `person_count` counts distinct patients (not condition rows) in
+each cell. This `where` clause is the only thing that changes between cohorts -
+everything below reuses the same shape.
 >>>malloy
 import 'omop.malloy'
 
@@ -35,14 +43,14 @@ run: patient -> {
 >>>markdown
 ## Comorbidity comparison
 
-For each cohort, the top comorbidities. The cohort is defined in the first stage
-(a list of `person_id`s), then the second stage scans each member's full
-condition history and nests the most common other conditions. Defining the cohort
-separately from the comorbidity scan keeps the cohort's index filter from hiding
-the other conditions.
+The reusable cohort shape from [`cohorts.malloynb`](cohorts.malloynb): define the
+cohort as a list of `person_id`s in the first stage, then `join_one: patient` and
+`nest:` each member's top other conditions. Here it runs twice - once per
+condition, changing only the `where` - so the two profiles sit side by side.
 
-Compare the two outputs: COVID-19 members carry acute respiratory conditions,
-while coronary arteriosclerosis members carry cardiovascular comorbidities.
+Compare the outputs: COVID-19 members carry acute respiratory conditions, while
+coronary arteriosclerosis members carry cardiovascular comorbidities - the cohort
+filter is the only difference between the two queries.
 >>>malloy
 # COVID-19 cohort: top comorbidities
 run: condition_occurrence -> {

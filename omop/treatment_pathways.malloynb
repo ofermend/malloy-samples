@@ -9,7 +9,6 @@ Below: the first three drugs prescribed to each patient in the dataset, ranked p
 >>>malloy
 import 'omop.malloy'
 
-# bar_chart
 run: drug_exposure -> {
   group_by: person_id, drug_name is drug_concept.concept_name, drug_exposure_start_date
   order_by: person_id, drug_exposure_start_date
@@ -35,7 +34,3 @@ run: drug_exposure -> {
   group_by: drug_name
   aggregate: patient_count is count(person_id)
 }
->>>markdown
-## The pattern: rank, then aggregate
-
-Stage one numbers each patient's prescriptions by date (`row_number()` with `partition_by`); stage two filters to the ranks you want and counts. To compare *consecutive* prescriptions instead of fixed positions, swap `row_number()` for `lag()` / `lead()` — same two-stage shape.

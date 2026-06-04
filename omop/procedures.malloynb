@@ -3,7 +3,7 @@
 
 OMOP procedure_occurrence captures all clinical procedures - surgeries, diagnostic procedures, interventions, etc. This notebook shows common procedures, their frequency, and how procedures relate to patient conditions.
 
-`top: 10` keeps the 10 most frequent procedures; `procedure_count` and `patient_count` are measures defined in the `procedure_occurrence` source.
+This first query ranks the 10 most common procedures, showing both how often each is performed (`procedure_count`, one per event) and how many distinct patients received it (`patient_count`). A gap between the two flags procedures that repeat on the same patients. `top: 10` and both measures come from the `procedure_occurrence` source.
 >>>malloy
 import 'omop.malloy'
 
@@ -71,7 +71,7 @@ run: patient -> {
 
 ## Procedure timeline per patient
 
-For one patient (`person_id = 1813`, an example - pick any id), group by `procedure_date` to list their procedures in date order.
+A single patient's procedure history in date order - the patient-level view behind all the cohort aggregates above. Filtering to one `person_id` (1813 here - pick any id) and grouping by `procedure_date` turns the event table into a readable clinical timeline. This is the drill-down you reach for when a cohort result raises "what actually happened to this patient?"
 >>>malloy
 run: procedure_occurrence -> {
   where: person_id = 1813

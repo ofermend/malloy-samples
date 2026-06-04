@@ -27,9 +27,11 @@ run: visit_occurrence -> {
 >>>markdown
 ## Visits per patient
 
-First compute each patient's visit count, then bucket patients by it. The two
-stages make "aggregate, then analyze" explicit - you can't group by an aggregate
-in a single pass.
+The distribution of visit volume across the cohort: one row per visit count,
+showing how many patients had that many encounters. It uses the same two-stage
+"aggregate, then analyze" shape seen elsewhere - first group by `person_id` for
+each patient's visit count, then group again to bucket patients by it (you can't
+group by an aggregate in a single pass).
 >>>malloy
 run: patient -> {
   group_by: person_id
