@@ -76,10 +76,13 @@ source: covid_cohort is condition_occurrence -> {
     followup_years is patient.observation_period.followup_years.avg()
 }
 >>>markdown
-### Horizontal — the nested form
+### Creating a "Table-1"
+
+Here we create the standard "Table 1" baseline characteristics which is common in many
+medical journal papers and summarizes baseline characteristics.
 
 Malloy's natural way to summarize is **nesting**, and it makes a compact Table 1 in a
-single query — no wide → long unpivot:
+single query.
 
 - The continuous stats (patients, age, visits, follow-up) are **top-level
   aggregates**, split Survived / Died as columns.
@@ -125,15 +128,21 @@ run: covid_cohort extend {
   nest: `Age band` is n_pct + { group_by: subgroup is age_band;  order_by: subgroup }
 }
 >>>markdown
-### Vertical — the finished Table 1 (NEJM style)
+### Table 1 - Journal style
 
-This is the layout a journal paper uses: characteristics down the left, the two
-outcome groups as columns. It takes more work than the horizontal form — it stacks
-every characteristic into one column, which Malloy does not do natively:
-- **Wide → long.** Sex, race, ethnicity, and age band are different fields, but a
-  Table 1 stacks them in one column. We unnest a small array literal (`line`) so each
-  patient emits one row per characteristic — Malloy's stand-in for SQL `UNPIVOT` —
-  with an `ord` to keep the sections in order.
+The above for of "Table-1" (horizontal) is not the typical way table-1 is dislplyed.
+Instead, it is common to have a layout where characteristics are down the left, and the two
+outcome groups are columns. 
+
+This is, unfortunately, not easily supported in Malloy (as of June 2026) - it requires two things: 
+(1) wide→long / UNPIVOT to stack Sex/Race/Ethnicity/Age-band into one column, and 
+(2) mixed row formats in one column (mean (SD) for continuous rows, n (%) for categorical). 
+
+To make this work, we use a the array-literal line trick shown below to emulate UNPIVOT. 
+Specificially, we unnest a small array literal (`line`) so each patient emits one row per characteristic,
+with an `ord` to keep the sections in order.
+
+In addition we apply the following technique here:
 - **Percent within column** — `exclude(count() { … }, level)` is the section's
   column total (all survivors / all deaths), the denominator for each `n (%)`.
 - **One format per line** — continuous rows (patient count, mean age, visits,
