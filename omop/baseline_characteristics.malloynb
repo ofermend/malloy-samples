@@ -1,7 +1,7 @@
 >>>markdown
 # Baseline Characteristics Table (Table 1)
 
-Almost every observational study opens with when is known as a "Table 1": a structured summary of
+Almost every observational study opens with what is known as a "Table 1": a structured summary of
 the study cohort, usually **stratified by an exposure or outcome group** so the
 reader can compare the groups side by side.
 
@@ -130,7 +130,7 @@ run: covid_cohort extend {
 >>>markdown
 ### Table 1 - Journal style
 
-The above for of "Table-1" (horizontal) is not the typical way table-1 is dislplyed.
+The above form of "Table-1" (horizontal) is not the typical way table-1 is displayed.
 Instead, it is common to have a layout where characteristics are down the left, and the two
 outcome groups are columns. 
 
@@ -139,7 +139,7 @@ This is, unfortunately, not easily supported in Malloy (as of June 2026) - it re
 (2) mixed row formats in one column (mean (SD) for continuous rows, n (%) for categorical). 
 
 To make this work, we use a the array-literal line trick shown below to emulate UNPIVOT. 
-Specificially, we unnest a small array literal (`line`) so each patient emits one row per characteristic,
+Specifically, we unnest a small array literal (`line`) so each patient emits one row per characteristic,
 with an `ord` to keep the sections in order.
 
 In addition we apply the following technique here:

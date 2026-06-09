@@ -60,7 +60,7 @@ Does death rate rises steeply with age at diagnosis?
 Here the second stage joins each cohort member to `patient` (which carries the `death`
 join), so `death_count / count()` is the mortality rate within each age band.
 
-As you can see with Malloy thish is computed in one pass, no separate "numerator" and "denominator" queries.
+As you can see with Malloy this is computed in one pass, no separate "numerator" and "denominator" queries.
 >>>malloy
 run: condition_occurrence -> {
   where: condition_concept.concept_name = 'COVID-19'
