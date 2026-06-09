@@ -10,3 +10,5 @@ omop/data/
 
 # Local dev helper for running OMOP Malloy queries; not part of the sample
 omop/scripts/run_malloy.cjs
+
+publisher.db*
