@@ -1,0 +1,104 @@
+>>>markdown
+# Givens
+
+A **given** is a named value declared once at the top of a model and supplied from *outside* the model - by the application at runtime, a config file, or per query. Every source and query reads the same value through a `$name` reference.
+
+Use givens for values that belong to the runtime rather than the model: a tenant id, an environment threshold, a date cutoff, or the set of regions a user is allowed to see.
+
+\> Givens are behind an experimental flag: `##! experimental.givens`. They are the recommended replacement for source parameters - see the comparison at the end.
+>>>malloy
+##! experimental.givens
+
+given:
+  carrier_filter :: string is 'WN'
+  min_delay :: number is 0
+
+source: flights is duckdb.table('data/flights.parquet') extend {
+  where: carrier = $carrier_filter
+  where: dep_delay >= $min_delay
+  measure:
+    flight_count is count()
+    avg_delay is dep_delay.avg()
+}
+>>>markdown
+References use a `$` sigil (`$carrier_filter`). When you run this notebook the givens fall back to their declared defaults - Southwest (`'WN'`), no delay floor - so every query below reads those values:
+>>>malloy
+run: flights -> {
+  group_by: dep_time.year
+  aggregate: flight_count, avg_delay
+}
+>>>markdown
+The same `flights` source, unchanged, answers a different question once the givens hold different values. In an application you supply them at runtime (next section); in the notebook we rely on the defaults.
+
+## List givens
+
+A given can be a list, matched with `in`:
+>>>malloy
+##! experimental.givens
+
+given:
+  origins :: string[] is ['SFO', 'OAK', 'SJC']
+
+source: bay_area_flights is duckdb.table('data/flights.parquet') extend {
+  where: origin in $origins
+  measure: flight_count is count()
+}
+
+run: bay_area_flights -> {
+  group_by: origin
+  aggregate: flight_count
+}
+>>>markdown
+## Supplying values at runtime
+
+Givens are bound *outside* Malloy, so one model serves every caller with no edits. There are three layers, each overriding the one before it.
+
+A config file points at a JSON map of values:
+
+```
+// malloy-config.json
+{ "givensPath": "./givens.json" }
+```
+```
+// givens.json
+{ "carrier_filter": "AA", "min_delay": 60 }
+```
+
+The runtime can supply them directly - for example, one set of values per tenant:
+
+```js
+const runtime = new Runtime({
+  connection, urlReader,
+  givens: { carrier_filter: claims.carrier, min_delay: 60 },
+});
+```
+
+A single query can override on top of both:
+
+```js
+await query.run({ givens: { carrier_filter: 'UA' } });
+```
+
+For values a caller must not change - a tenant id, an access-control filter - list them under `finalizeGivens` in the config and overrides are rejected.
+
+## Givens vs. parameterized sources
+
+Source parameters solve a similar problem - reuse one definition with different values - but they bind at the *call site*, inside the model:
+
+```malloy
+// parameter: a value chosen each time the source is used
+source: flights(carrier_filter::string is 'WN') is duckdb.table('data/flights.parquet') extend {
+  where: carrier = carrier_filter
+}
+run: flights(carrier_filter is 'AA') -> { ... }
+```
+
+The real difference is where the value comes from:
+
+| | Parameterized source | Given |
+|---|---|---|
+| Where the value is set | At each call site, inside the model | Once, by the runtime/app, outside the model |
+| Scope | Per instantiation - two copies can coexist | One value per name across the whole model |
+| Best for | Two differently-bound copies in one model | Configuration, thresholds, multi-tenant access control |
+
+**Going forward, prefer givens.** Most "reuse this model with different values" cases are really *configuration* - a tenant, an environment, a user's permissions. Givens keep that out of the model and let the application inject it at runtime: you don't thread the same value through every source and nested query, and `finalizeGivens` can lock sensitive values so a caller can't override them. Reach for a parameterized source only when you genuinely need two differently-bound copies of the same source in a single model.

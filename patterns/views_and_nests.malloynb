@@ -36,9 +36,19 @@ run: flights -> by_carrier + {
   order_by: flight_count desc
 }
 >>>markdown
-## Nesting views for drill-down
+## Nesting: several perspectives in one query
 
-`nest:` embeds another query under each row of the outer query. Here, each carrier row gets its own top-5 origin breakdown — one query, two levels of detail:
+`nest`, `group_by`, and `aggregate` aren't alternatives - they do different jobs, and a single query uses them together:
+
+- `group_by` sets the **dimensions** - the rows, the grain ("one row per carrier").
+- `aggregate` computes the **measures** - the numbers at that grain (`flight_count`, `avg_delay`).
+- `nest` embeds a **whole subquery** under each outer row. That subquery has its own `group_by` and `aggregate`, so it produces its own table at its own grain.
+
+So `nest` doesn't replace `group_by`/`aggregate` - it *contains* them. A nest is just another query (or named view) run once per row of the query around it.
+
+Nesting is the recommended way to see data from several angles at once. The alternatives are worse: run a separate flat query per level and stitch the results together yourself, or write one wide `group_by` across every dimension - which repeats the parent totals on every child row and still can't show two independent breakdowns side by side. A nest keeps each level at its own correct grain in one result.
+
+Here, each carrier row gets its own top-5 origin breakdown - one query, two levels of detail:
 >>>malloy
 run: flights -> by_carrier + {
   nest: top_origins is by_origin
@@ -46,7 +56,7 @@ run: flights -> by_carrier + {
 >>>markdown
 ## Inline (ad-hoc) nests
 
-You don't have to predefine the inner view. Inline `nest:` blocks are great for one-off drill-downs:
+You don't have to predefine the inner view. Inline `nest:` blocks are great for one-off drill-downs. The two nests below sit side by side, so each carrier row carries both its year-by-year trend and its top destinations - two independent breakdowns a single flat `group_by` can't produce together:
 >>>malloy
 run: flights -> {
   group_by: carrier
