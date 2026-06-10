@@ -40,8 +40,7 @@
   "dependencies": {
     "@malloydata/db-bigquery": "0.0.405",
     "@malloydata/db-duckdb": "0.0.405",
-    "@malloydata/malloy": "^0.0.405",
-    "@malloydata/malloy-connections": "^0.0.405",
+    "@malloydata/malloy": "0.0.405",
     "@malloydata/malloy-sql": "0.0.405",
     "@types/jest": "^29.2.5",
     "@typescript-eslint/eslint-plugin": "^5.48.2",
