@@ -28,10 +28,6 @@ run: flights -> {
   aggregate: flight_count, avg_delay
 }
 >>>markdown
-The model itself never changes - the same `flights` source serves whatever values the givens hold. Here it ran with the defaults; supplying real values at runtime is covered below under "Supplying values at runtime".
-
-## List givens
-
 A given can be a list, matched with `in`:
 >>>malloy
 ##! experimental.givens
