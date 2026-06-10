@@ -5,7 +5,7 @@ A **given** is a named value declared once at the top of a model and supplied fr
 
 Use givens for values that belong to the runtime rather than the model: a tenant id, an environment threshold, a date cutoff, or the set of regions a user is allowed to see.
 
-**Note:** Givens are behind an experimental flag: `##! experimental.givens`. They are the recommended replacement for source parameters - see the comparison at the end.
+**Note:** Givens are behind an experimental flag: `##! experimental.givens`. They are the modern take on what 'source parameters' first set out to do - see the comparison at the end.
 >>>malloy
 ##! experimental.givens
 
@@ -99,4 +99,6 @@ The real difference is where the value comes from:
 | Scope | Per instantiation - two copies can coexist | One value per name across the whole model |
 | Best for | Two differently-bound copies in one model | Configuration, thresholds, multi-tenant access control |
 
-**Going forward, prefer givens.** Most "reuse this model with different values" cases are really *configuration* - a tenant, an environment, a user's permissions. Givens keep that out of the model and let the application inject it at runtime: you don't thread the same value through every source and nested query, and `finalizeGivens` can lock sensitive values so a caller can't override them. Reach for a parameterized source only when you genuinely need two differently-bound copies of the same source in a single model.
+Givens are the direction Malloy is heading. Source parameters were the first attempt at "reuse one model with different values"; givens address that same need more directly. Most such cases are really configuration - a tenant, an environment, a user's permissions - and givens keep that out of the model: the application injects the value at runtime, you don't thread it through every source and nested query, and finalizeGivens can lock sensitive values so a caller can't override them.
+
+The one thing a parameterized source still does that a given doesn't is bind two differently-valued copies of the same source in a single model. In practice that rarely comes up — but if you hit it, that's the case for a parameterized source.
