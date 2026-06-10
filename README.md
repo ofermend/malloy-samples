@@ -118,7 +118,7 @@ npm ci
 npm run test-silent
 ```
 
-The DuckDB suite always runs. The BigQuery suite is skipped automatically when no credentials are present (`GOOGLE_APPLICATION_CREDENTIALS`, `BIGQUERY_KEY`, or `gcloud` application default credentials), so this command is safe to run without a Google Cloud account.
+The DuckDB suite runs without setup. The BigQuery suite requires Google Cloud credentials; without them those samples will fail to compile, so authenticate (or skip the `bigquery/` samples) before running.
 
 To bump to the latest published Malloy and re-test:
 
