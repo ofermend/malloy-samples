@@ -1,5 +1,5 @@
 >>>markdown
-# Views and Nested Drill-Down
+# Views
 
 A `view:` is a named, reusable query shape defined inside a source. A `nest:` embeds one query inside another so you get drill-down detail alongside summaries - without writing a second query.
 

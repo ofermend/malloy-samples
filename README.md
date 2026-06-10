@@ -74,7 +74,7 @@ Once you've finished the tour, the patterns library is a reference organized by 
 
 ### Reusable structure
 * [Givens](patterns/givens.malloynb) — Supply model-wide values (tenant, thresholds, filters) from the runtime instead of hardcoding them. The recommended way to reuse one model with different values.
-* [Views and Nested Drill-down](patterns/views_and_nests.malloynb) — Define reusable named query shapes and embed nested drill-downs in one query.
+* [Views](patterns/views.malloynb) — Define reusable named query shapes and embed nested drill-downs in one query.
 
 ### Other techniques
 * [Dimensional Indexes](patterns/dim_index.malloynb) - Find the most common values in your dataset.
