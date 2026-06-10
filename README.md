@@ -10,7 +10,7 @@ Familiarity with SQL concepts (GROUP BY, aggregates, joins) is helpful but not r
 </div>
 
 
-[Malloy](https://github.com/malloydata/malloy) is an open source semantic modeling and query language that compiles to SQL.
+[Malloy](https://github.com/malloydata/malloy) is a modern open source language for describing data relationships and transformations. It is both a semantic modeling language and a query language that uses an existing SQL engine to execute queries.
 
 These samples are a great way to learn Malloy’s core ideas and techniques (reusable joins, fan-out-safe aggregates, consistent measures, first-class nested data, and readable multi-step transforms) using real data.
 
