@@ -38,13 +38,7 @@ run: flights -> by_carrier + {
 >>>markdown
 ## Nesting: several perspectives in one query
 
-`nest`, `group_by`, and `aggregate` aren't alternatives - they do different jobs, and a single query uses them together:
-
-- `group_by` sets the **dimensions** - the rows, the grain ("one row per carrier").
-- `aggregate` computes the **measures** - the numbers at that grain (`flight_count`, `avg_delay`).
-- `nest` embeds a **whole subquery** under each outer row. That subquery has its own `group_by` and `aggregate`, so it produces its own table at its own grain.
-
-So `nest` doesn't replace `group_by`/`aggregate` - it *contains* them. A nest is just another query (or named view) run once per row of the query around it.
+A `nest:` runs a whole subquery - inline or a named view - once per row of the query around it. The nested query has its own `group_by` and `aggregate`, so it produces its own table at its own grain, embedded under each outer row.
 
 Nesting is the recommended way to see data from several angles at once. The alternatives are worse: run a separate flat query per level and stitch the results together yourself, or write one wide `group_by` across every dimension - which repeats the parent totals on every child row and still can't show two independent breakdowns side by side. A nest keeps each level at its own correct grain in one result. Nests are also safe under result row caps: a cap drops top-level rows only, so the breakdown under each surviving row stays complete.
 
