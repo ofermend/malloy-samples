@@ -12,7 +12,7 @@ run: flights -> top_carriers
 run: flights -> carriers_over_time
 >>>markdown
 ### Carrier Overview
-A dashboard showing high-level information for each Carrier"
+A dashboard showing high-level information for each Carrier
 >>>malloy
 // broken: https://github.com/malloydata/malloy/issues/1474
 

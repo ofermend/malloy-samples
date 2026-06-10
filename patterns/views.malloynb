@@ -1,0 +1,70 @@
+>>>markdown
+# Views
+
+A `view:` is a named, reusable query shape defined inside a source. A `nest:` embeds one query inside another so you get drill-down detail alongside summaries - without writing a second query.
+
+Together they let you compose dashboards out of small, named pieces.
+>>>malloy
+source: flights is duckdb.table('data/flights.parquet') extend {
+  measure:
+    flight_count is count()
+    avg_delay is dep_delay.avg()
+
+  view: by_carrier is {
+    group_by: carrier
+    aggregate: flight_count, avg_delay
+  }
+
+  view: by_origin is {
+    top: 5
+    group_by: origin
+    aggregate: flight_count, avg_delay
+  }
+}
+>>>markdown
+A named view is callable with `->`:
+>>>malloy
+run: flights -> by_carrier
+>>>markdown
+## Refining a view at the call site
+
+Use `+ { ... }` to add filters, limits, or extra clauses to a view without redefining it (`@2003` is a year literal; `=` matches any timestamp inside it):
+>>>malloy
+run: flights -> by_carrier + {
+  where: dep_time = @2003
+  top: 5
+  order_by: flight_count desc
+}
+>>>markdown
+## Nesting: several perspectives in one query
+
+A `nest:` runs a whole subquery - inline or a named view - once per row of the query around it. The nested query has its own `group_by` and `aggregate`, so it produces its own table at its own grain, embedded under each outer row.
+
+Nesting is the recommended way to see data from several angles at once. The alternatives are worse: run a separate flat query per level and stitch the results together yourself, or write one wide `group_by` across every dimension - which repeats the parent totals on every child row and still can't show two independent breakdowns side by side. A nest keeps each level at its own correct grain in one result. Nests are also safe under result row caps: a cap drops top-level rows only, so the breakdown under each surviving row stays complete.
+
+Here, each carrier row gets its own top-5 origin breakdown - one query, two levels of detail:
+>>>malloy
+run: flights -> by_carrier + {
+  nest: top_origins is by_origin
+}
+>>>markdown
+## Inline (ad-hoc) nests
+
+You don't have to predefine the inner view. Inline `nest:` blocks are great for one-off drill-downs. The two nests below sit side by side, so each carrier row carries both its year-by-year trend and its top destinations - two independent breakdowns a single flat `group_by` can't produce together:
+>>>malloy
+run: flights -> {
+  group_by: carrier
+  aggregate: flight_count
+  nest: by_year is {
+    group_by: flight_year is dep_time.year
+    aggregate: flight_count
+    order_by: flight_year
+  }
+  nest: top_destinations is {
+    top: 3
+    group_by: destination
+    aggregate: flight_count
+  }
+}
+>>>markdown
+Named views for shapes you reuse, inline nests for one-off drill-downs, and `+ { ... }` refinements to adjust either at the call site.

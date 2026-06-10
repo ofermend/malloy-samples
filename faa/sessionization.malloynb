@@ -1,6 +1,6 @@
 >>>markdown
 # Sessionization
-Trace routes of lanes throug the sky.
+Trace routes of lanes through the sky.
 
 If we think of aircraft flights as a transaction.  We can roll up all transactions in a given day by a carrier into a single nested table. Note: This represents a small sample of the complete FAA dataset!
 >>>malloy
@@ -9,7 +9,7 @@ import {flights} from 'flights.malloy'
 ## Rollup by Carrier Day.
 * Compute the number of flights on that carrier and day.
 * For each plane, calculate the number of flight legs on each day
-* Produce a subtable of each play/day of all the flight legs and delays
+* Produce a subtable of each plane/day of all the flight legs and delays
 >>>malloy
 run: flights -> {
   where: 

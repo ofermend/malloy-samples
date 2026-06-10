@@ -1,0 +1,104 @@
+>>>markdown
+# Givens
+
+A **given** is a named value declared once at the top of a model and supplied from *outside* the model - by the application at runtime, a config file, or per query. Every source and query reads the same value through a `$name` reference.
+
+Use givens for values that belong to the runtime rather than the model: a tenant id, an environment threshold, a date cutoff, or the set of regions a user is allowed to see.
+
+**Note:** Givens are behind an experimental flag: `##! experimental.givens`. They are the modern take on what 'source parameters' first set out to do - see the comparison at the end.
+>>>malloy
+##! experimental.givens
+
+given:
+  carrier_filter :: string is 'WN'
+  min_delay :: number is 0
+
+source: flights is duckdb.table('data/flights.parquet') extend {
+  where: carrier = $carrier_filter
+  where: dep_delay >= $min_delay
+  measure:
+    flight_count is count()
+    avg_delay is dep_delay.avg()
+}
+>>>markdown
+References use a `$` sigil (`$carrier_filter`). A given uses its declared default whenever the runtime doesn't supply a value. For example, the next cell has no runtime values for the givens, so the query below runs with the defaults - Southwest (`'WN'`) and a `min_delay` of 0:
+>>>malloy
+run: flights -> {
+  group_by: dep_time.year
+  aggregate: flight_count, avg_delay
+}
+>>>markdown
+A given can be a list, matched with `in`:
+>>>malloy
+##! experimental.givens
+
+given:
+  origins :: string[] is ['SFO', 'OAK', 'SJC']
+
+source: bay_area_flights is duckdb.table('data/flights.parquet') extend {
+  where: origin in $origins
+  measure: flight_count is count()
+}
+
+run: bay_area_flights -> {
+  group_by: origin
+  aggregate: flight_count
+}
+>>>markdown
+## Supplying values at runtime
+
+Givens are bound *outside* Malloy, so one model serves every caller with no edits. A value can come from three layers, listed here from lowest to highest precedence - each overrides the one before it.
+
+**1. Config file** - the base layer. `malloy-config.json` points at a JSON map of values:
+
+```
+// malloy-config.json
+{ "givensPath": "./givens.json" }
+```
+```
+// givens.json
+{ "carrier_filter": "AA", "min_delay": 60 }
+```
+
+**2. The runtime** - overrides the config file. For example, one set of values per tenant:
+
+```js
+const runtime = new Runtime({
+  connection, urlReader,
+  givens: { carrier_filter: claims.carrier, min_delay: 60 },
+});
+```
+
+**3. A single query** - overrides both the runtime and the config file, for just that call:
+
+```js
+await query.run({ givens: { carrier_filter: 'UA' } });
+```
+
+So for `carrier_filter`, a value passed to `query.run(...)` wins over the runtime's, which wins over the config file's, which falls back to the given's declared default if none of the three set it.
+
+For values a caller must not change - a tenant id, an access-control filter - list them under `finalizeGivens` in the config and overrides from the higher layers are rejected.
+
+## Givens vs. parameterized sources
+
+Source parameters solve a similar problem - reuse one definition with different values - but they bind at the *call site*, inside the model:
+
+```malloy
+// parameter: a value chosen each time the source is used
+source: flights(carrier_filter::string is 'WN') is duckdb.table('data/flights.parquet') extend {
+  where: carrier = carrier_filter
+}
+run: flights(carrier_filter is 'AA') -> { ... }
+```
+
+The real difference is where the value comes from:
+
+| | Parameterized source | Given |
+|---|---|---|
+| Where the value is set | At each call site, inside the model | Once, by the runtime/app, outside the model |
+| Scope | Per instantiation - two copies can coexist | One value per name across the whole model |
+| Best for | Two differently-bound copies in one model | Configuration, thresholds, multi-tenant access control |
+
+Givens are the direction Malloy is heading. Source parameters were the first attempt at "reuse one model with different values"; givens address that same need more directly. Most such cases are really configuration - a tenant, an environment, a user's permissions - and givens keep that out of the model: the application injects the value at runtime, you don't thread it through every source and nested query, and finalizeGivens can lock sensitive values so a caller can't override them.
+
+The one thing a parameterized source still does that a given doesn't is bind two differently-valued copies of the same source in a single model. In practice that rarely comes up — but if you hit it, that's the case for a parameterized source.
