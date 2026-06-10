@@ -5,7 +5,7 @@ A **given** is a named value declared once at the top of a model and supplied fr
 
 Use givens for values that belong to the runtime rather than the model: a tenant id, an environment threshold, a date cutoff, or the set of regions a user is allowed to see.
 
-\> Givens are behind an experimental flag: `##! experimental.givens`. They are the recommended replacement for source parameters - see the comparison at the end.
+**Note:** Givens are behind an experimental flag: `##! experimental.givens`. They are the recommended replacement for source parameters - see the comparison at the end.
 >>>malloy
 ##! experimental.givens
 
@@ -21,14 +21,14 @@ source: flights is duckdb.table('data/flights.parquet') extend {
     avg_delay is dep_delay.avg()
 }
 >>>markdown
-References use a `$` sigil (`$carrier_filter`). When you run this notebook the givens fall back to their declared defaults - Southwest (`'WN'`), no delay floor - so every query below reads those values:
+References use a `$` sigil (`$carrier_filter`). A given uses its declared default whenever the runtime doesn't supply a value. For example, the next cell has no runtime values for the givens, so the query below runs with the defaults - Southwest (`'WN'`) and a `min_delay` of 0:
 >>>malloy
 run: flights -> {
   group_by: dep_time.year
   aggregate: flight_count, avg_delay
 }
 >>>markdown
-The same `flights` source, unchanged, answers a different question once the givens hold different values. In an application you supply them at runtime (next section); in the notebook we rely on the defaults.
+The model itself never changes - the same `flights` source serves whatever values the givens hold. Here it ran with the defaults; supplying real values at runtime is covered below under "Supplying values at runtime".
 
 ## List givens
 
@@ -51,9 +51,9 @@ run: bay_area_flights -> {
 >>>markdown
 ## Supplying values at runtime
 
-Givens are bound *outside* Malloy, so one model serves every caller with no edits. There are three layers, each overriding the one before it.
+Givens are bound *outside* Malloy, so one model serves every caller with no edits. A value can come from three layers, listed here from lowest to highest precedence - each overrides the one before it.
 
-A config file points at a JSON map of values:
+**1. Config file** - the base layer. `malloy-config.json` points at a JSON map of values:
 
 ```
 // malloy-config.json
@@ -64,7 +64,7 @@ A config file points at a JSON map of values:
 { "carrier_filter": "AA", "min_delay": 60 }
 ```
 
-The runtime can supply them directly - for example, one set of values per tenant:
+**2. The runtime** - overrides the config file. For example, one set of values per tenant:
 
 ```js
 const runtime = new Runtime({
@@ -73,13 +73,15 @@ const runtime = new Runtime({
 });
 ```
 
-A single query can override on top of both:
+**3. A single query** - overrides both the runtime and the config file, for just that call:
 
 ```js
 await query.run({ givens: { carrier_filter: 'UA' } });
 ```
 
-For values a caller must not change - a tenant id, an access-control filter - list them under `finalizeGivens` in the config and overrides are rejected.
+So for `carrier_filter`, a value passed to `query.run(...)` wins over the runtime's, which wins over the config file's, which falls back to the given's declared default if none of the three set it.
+
+For values a caller must not change - a tenant id, an access-control filter - list them under `finalizeGivens` in the config and overrides from the higher layers are rejected.
 
 ## Givens vs. parameterized sources
 

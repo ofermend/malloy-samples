@@ -28,7 +28,7 @@ run: flights -> by_carrier
 >>>markdown
 ## Refining a view at the call site
 
-Use `+ { ... }` to add filters, limits, or extra clauses to a view without redefining it:
+Use `+ { ... }` to add filters, limits, or extra clauses to a view without redefining it (`@2003` is a year literal; `=` matches any timestamp inside it):
 >>>malloy
 run: flights -> by_carrier + {
   where: dep_time = @2003
@@ -46,7 +46,7 @@ run: flights -> by_carrier + {
 
 So `nest` doesn't replace `group_by`/`aggregate` - it *contains* them. A nest is just another query (or named view) run once per row of the query around it.
 
-Nesting is the recommended way to see data from several angles at once. The alternatives are worse: run a separate flat query per level and stitch the results together yourself, or write one wide `group_by` across every dimension - which repeats the parent totals on every child row and still can't show two independent breakdowns side by side. A nest keeps each level at its own correct grain in one result.
+Nesting is the recommended way to see data from several angles at once. The alternatives are worse: run a separate flat query per level and stitch the results together yourself, or write one wide `group_by` across every dimension - which repeats the parent totals on every child row and still can't show two independent breakdowns side by side. A nest keeps each level at its own correct grain in one result. Nests are also safe under result row caps: a cap drops top-level rows only, so the breakdown under each surviving row stays complete.
 
 Here, each carrier row gets its own top-5 origin breakdown - one query, two levels of detail:
 >>>malloy
@@ -72,3 +72,5 @@ run: flights -> {
     aggregate: flight_count
   }
 }
+>>>markdown
+Named views for shapes you reuse, inline nests for one-off drill-downs, and `+ { ... }` refinements to adjust either at the call site.
