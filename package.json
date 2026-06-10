@@ -1,6 +1,6 @@
 {
   "name": "malloy-samples",
-  "version": "0.0.1",
+  "version": "0.0.405",
   "description": "Malloy sample files",
   "config": {
     "malloy_packages": [
