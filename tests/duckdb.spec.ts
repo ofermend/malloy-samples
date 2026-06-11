@@ -33,6 +33,7 @@ const EXCEPT_LIST = [
   'bigquery',
   'build_titles.malloysql',
   'node_modules',
+  'omop',
   'tmp',
 ];
 

@@ -1,0 +1,20 @@
+// Synthea COVID-19 dataset configuration for OMOP CDM v5.3.
+// Defines ONLY the data file paths - no semantic knowledge.
+//
+// Data: the 'synthea-covid19-10k' CDMConnector example dataset (~10,700 synthetic
+// patients with a COVID-19 module), distributed by the OHDSI/darwin-eu community.
+// See omop/scripts/setup.sh, which downloads it and extracts the tables below.
+//
+// Raw sources are prefixed with 'omop_' to avoid naming conflicts with the
+// semantic layer in omop.malloy.
+
+source: omop_concept is duckdb.table('omop/data/concept.parquet')
+source: omop_vocabulary is duckdb.table('omop/data/vocabulary.parquet')
+source: omop_domain is duckdb.table('omop/data/domain.parquet')
+source: omop_person is duckdb.table('omop/data/person.parquet')
+source: omop_visit_occurrence is duckdb.table('omop/data/visit_occurrence.parquet')
+source: omop_condition_occurrence is duckdb.table('omop/data/condition_occurrence.parquet')
+source: omop_drug_exposure is duckdb.table('omop/data/drug_exposure.parquet')
+source: omop_procedure_occurrence is duckdb.table('omop/data/procedure_occurrence.parquet')
+source: omop_observation_period is duckdb.table('omop/data/observation_period.parquet')
+source: omop_death is duckdb.table('omop/data/death.parquet')

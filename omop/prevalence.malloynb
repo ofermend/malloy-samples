@@ -1,0 +1,68 @@
+>>>markdown
+# Condition Prevalence Over Time
+
+Track how often a condition is diagnosed over time, then break it down by age band and turn the counts into a share of the cohort.
+
+We use **coronary arteriosclerosis** - a chronic condition diagnosed across many years here, so the time trend is meaningful (unlike an acute infection confined to a year or two). Synthea backdates chronic diagnoses across each patient's simulated life, so the records reach back to the 1920s with only a handful per year early on. We filter to **1980 onward**, where the yearly counts are large enough to read.
+
+This first query produces the basic trend: how many distinct patients were diagnosed in each year. One row per year, ready to plot as a line.
+
+`dx_year` is a model dimension that pulls the year out of `condition_start_date`, so you can group by it - and filter on it - directly. `patient_count` is `count(person_id)`, a distinct count, so a patient with several records in the same year still counts once.
+>>>malloy
+import 'omop.malloy'
+
+# line_chart
+run: condition_occurrence -> {
+  where:
+    condition_concept.concept_name = 'Coronary arteriosclerosis',
+    dx_year >= 1980
+  group_by: dx_year
+  aggregate: patient_count
+  order_by: dx_year
+  limit: 50
+}
+>>>markdown
+## Stratify by age band
+
+This splits the same yearly trend by age group, so you can see which ages drive the diagnoses rather than just the total. The result is one line per age band over time.
+
+Adding a second `group_by:` produces the multi-series breakdown, one series per age group. We band patients by their **age at diagnosis** - `dx_year - person.year_of_birth` - not their age today. The model's `person.age_band` uses current age, which would file almost every coronary patient under `65+` (they're old now); age at diagnosis is both the epidemiologically correct stratifier and the one that actually spreads patients across the bands.
+>>>malloy
+
+# line_chart
+run: condition_occurrence -> {
+  where:
+    condition_concept.concept_name = 'Coronary arteriosclerosis',
+    dx_year >= 1980
+  group_by:
+    dx_year
+    age_at_dx is (dx_year - person.year_of_birth) ?
+      pick '0-17'  when < 18
+      pick '18-39' when < 40
+      pick '40-64' when < 65
+      else '65+'
+  aggregate: patient_count
+  order_by: dx_year
+  limit: 500
+}
+>>>markdown
+## Share of the cohort by age band
+
+This drops the time axis to answer a different question: of everyone ever diagnosed, what fraction falls in each age band? Each row is one band with its patient count and its percentage of the whole cohort.
+
+`all(patient_count)` ignores the current `group_by` and returns the cohort-wide total, so each band's count divided by it is that band's share. In SQL this is a window function or correlated subquery; in Malloy it's one expression. We band by age at diagnosis here too, so the shares line up with the chart above.
+>>>malloy
+run: condition_occurrence -> {
+  where:
+    condition_concept.concept_name = 'Coronary arteriosclerosis',
+    dx_year >= 1980
+  group_by:
+    age_at_dx is (dx_year - person.year_of_birth) ?
+      pick '0-17'  when < 18
+      pick '18-39' when < 40
+      pick '40-64' when < 65
+      else '65+'
+  aggregate:
+    patients is patient_count
+    pct_of_cohort is patient_count / all(patient_count) * 100
+}

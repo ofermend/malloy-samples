@@ -1,0 +1,81 @@
+>>>markdown
+# Procedures and Clinical Interventions
+
+OMOP procedure_occurrence captures all clinical procedures - surgeries, diagnostic procedures, interventions, etc. This notebook shows common procedures, their frequency, and how procedures relate to patient conditions.
+
+This first query ranks the 10 most common procedures, showing both how often each is performed (`procedure_count`, one per event) and how many distinct patients received it (`patient_count`). A gap between the two flags procedures that repeat on the same patients. `top: 10` and both measures come from the `procedure_occurrence` source.
+>>>malloy
+import 'omop.malloy'
+
+# Top procedures by frequency
+run: procedure_occurrence -> {
+  top: 10
+  group_by: procedure_concept.concept_name
+  aggregate:
+    procedure_count
+    patient_count
+  order_by: procedure_count desc
+}
+>>>markdown
+
+## Top procedures by age band
+
+A raw count by demographics only tells you which age band is largest. The useful question is *which* procedures each band receives. `nest:` runs a sub-query inside each `age_band` group, so every row carries its own ranked procedure list - Malloy's nested results, in place of a separate query per band.
+
+The mix shifts with age: the 65+ band is dominated by cardiac procedures (echocardiography, cardioversion, catheter ablation), while the youngest band leans to acute and respiratory care (chest X-ray, oxygen administration) from the COVID cohort. `patient_count` is a distinct count, so a procedure repeated on one patient counts once.
+
+(`age_band` here is the model's *current*-age dimension. A strict age-at-procedure view would derive the age from `procedure_date`, the way `prevalence.malloynb` does for diagnosis; current age is kept here for simplicity.)
+>>>malloy
+run: procedure_occurrence -> {
+  group_by: person.age_band
+  aggregate: patient_count
+  nest: top_procedures is {
+    top: 3
+    group_by: procedure_concept.concept_name
+    aggregate: patient_count
+    order_by: patient_count desc
+  }
+}
+>>>markdown
+
+## Procedures co-occurring with a condition
+
+Start from `patient`, filter by a condition, group by procedure. Conditions and procedures are both join-many under patient, but `procedures.patient_count` counts distinct patients per procedure without fan-out - symmetric aggregates again.
+>>>malloy
+run: patient -> {
+  where: conditions.condition_concept.concept_name = 'Coronary arteriosclerosis'
+  group_by: procedures.procedure_concept.concept_name
+  aggregate:
+    procedure_count is procedures.procedure_count
+    affected_patients is procedures.patient_count
+  order_by: affected_patients desc
+  limit: 10
+}
+>>>markdown
+
+## Patients with multiple procedures
+
+This builds the distribution of procedure volume per patient: one row per distinct procedure count, showing how many patients had exactly that many procedures. It tells you the shape of utilization across the cohort - most patients have few procedures, with a long tail of heavy users.
+
+The query runs in two stages. First group by patient to get each one's total procedure count, then group again to bucket patients by that count. The two stages keep "aggregate, then analyze" explicit - you can't group by a measure in a single pass.
+>>>malloy
+run: patient -> {
+  group_by: person_id
+  aggregate: procedure_count is total_procedures
+} -> {
+  group_by: procedure_count
+  aggregate: patient_count is count()
+  order_by: procedure_count
+}
+>>>markdown
+
+## Procedure timeline per patient
+
+A single patient's procedure history in date order - the patient-level view behind all the cohort aggregates above. Filtering to one `person_id` (1813 here - pick any id) and grouping by `procedure_date` turns the event table into a readable clinical timeline. This is the drill-down you reach for when a cohort result raises "what actually happened to this patient?"
+>>>malloy
+run: procedure_occurrence -> {
+  where: person_id = 1813
+  group_by: procedure_date, procedure_concept.concept_name
+  aggregate: procedure_count is count()
+  order_by: procedure_date
+}

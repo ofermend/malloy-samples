@@ -1,0 +1,97 @@
+>>>markdown
+# Comorbidity Burden
+
+A patient's number of distinct comorbid conditions is a simple, widely used proxy
+for disease burden and a strong predictor of outcomes. (Weighted indices like
+**Charlson** refine this by scoring each condition; the structure below is the
+same — you would swap the plain count for a weighted sum over mapped concept_ids.)
+
+Two separate facts per patient drive this notebook: **how many other conditions
+they carry** (the burden — 0, 1, 2, …) and **whether they died** (a yes/no
+outcome). We group patients by the first and measure the death rate within each
+group. So we count each COVID-19 patient's distinct comorbid conditions, bucket
+patients into burden tiers, and show how mortality rises with burden.
+
+## Comorbidity count per patient
+
+This first cell is just a look at the raw metric — one row per patient, counting
+*conditions* (death isn't involved yet). The cohort is defined in the first stage
+(patients with COVID-19). The second stage joins each to `patient` and counts their
+**distinct** conditions other than COVID-19 — `count(...condition_concept.concept_name)`
+counts distinct names, and the `{ where: ... }` filter excludes the index diagnosis
+itself.
+>>>malloy
+import 'omop.malloy'
+
+run: condition_occurrence -> {
+  where: condition_concept.concept_name = 'COVID-19'
+  group_by: person_id
+} -> {
+  join_one: patient with person_id
+  group_by: person_id, vital_status is patient.vital_status
+  aggregate:
+    n_comorbidities is count(patient.conditions.condition_concept.concept_name) {
+      where: patient.conditions.condition_concept.concept_name != 'COVID-19'
+    }
+  order_by: n_comorbidities desc
+  top: 15
+}
+>>>markdown
+## Burden tier distribution
+
+Bucket patients into burden tiers. A `pick` expression turns the count into an
+ordinal category in one step — no CASE ladder, no separate lookup table. Still no
+mortality here: we just count how many patients land in each tier, which shows the
+cohort's shape (most have few comorbidities, a tail have many).
+>>>malloy
+run: condition_occurrence -> {
+  where: condition_concept.concept_name = 'COVID-19'
+  group_by: person_id
+} -> {
+  join_one: patient with person_id
+  group_by: person_id
+  aggregate:
+    n_comorbidities is count(patient.conditions.condition_concept.concept_name) {
+      where: patient.conditions.condition_concept.concept_name != 'COVID-19'
+    }
+} -> {
+  group_by: burden_tier is n_comorbidities ?
+    pick '0'   when = 0
+    pick '1-2' when <= 2
+    pick '3-5' when <= 5
+    else '6+'
+  aggregate: patients is count()
+  order_by: burden_tier
+}
+>>>markdown
+## Mortality by comorbidity burden
+
+The payoff: mortality rises with burden tier. The final stage carries each
+patient's `vital_status` (from the `death` join in the model), so the death rate
+in each tier is `count() { where: vital_status = 'Died' } / count()` — numerator
+and denominator in one query, no self-join. Each patient is Died or Survived
+exactly once, so `count() { where: vital_status = 'Died' }` over a tier is simply
+the number of patients in it who died; divide by the tier size for its death rate.
+>>>malloy
+run: condition_occurrence -> {
+  where: condition_concept.concept_name = 'COVID-19'
+  group_by: person_id
+} -> {
+  join_one: patient with person_id
+  group_by: person_id, vital_status is patient.vital_status
+  aggregate:
+    n_comorbidities is count(patient.conditions.condition_concept.concept_name) {
+      where: patient.conditions.condition_concept.concept_name != 'COVID-19'
+    }
+} -> {
+  group_by: burden_tier is n_comorbidities ?
+    pick '0'   when = 0
+    pick '1-2' when <= 2
+    pick '3-5' when <= 5
+    else '6+'
+  aggregate:
+    patients is count()
+    deaths is count() { where: vital_status = 'Died' }
+    mortality_pct is round(count() { where: vital_status = 'Died' } / count() * 100, 1)
+  order_by: burden_tier
+}

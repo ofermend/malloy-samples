@@ -1,0 +1,111 @@
+>>>markdown
+# Cohort Reusability Patterns
+
+A common OHDSI workflow: define a cohort analysis once, then run it for several
+conditions and compare. This notebook analyzes patient cohorts and their
+comorbidities, then reruns the *same* query shape for a different condition.
+
+The pattern: filter to a condition, aggregate demographics, identify common
+comorbidities. Changing only the `where` clause re-targets the whole analysis -
+no duplicated logic.
+
+## A cohort's demographic profile
+
+The starting point: who is in the COVID-19 cohort, broken down by age band and
+sex. Filtering `conditions` on the `patient` source keeps the patient as the unit
+of analysis, so `person_count` counts distinct patients (not condition rows) in
+each cell. This `where` clause is the only thing that changes between cohorts -
+everything below reuses the same shape.
+>>>malloy
+import 'omop.malloy'
+
+# COVID-19 cohort: demographics
+run: patient -> {
+  where: conditions.condition_concept.concept_name = 'COVID-19'
+  group_by: age_band, gender.concept_name
+  aggregate: cohort_size is person_count
+  order_by: age_band
+}
+>>>markdown
+## Compare across different conditions
+
+The same query structure applied to a different condition. Comparing the COVID-19
+cohort with the coronary arteriosclerosis cohort shows how demographics shift -
+the cardiac cohort skews older. Write once, parameterize by the `where` clause.
+>>>malloy
+# Coronary arteriosclerosis cohort: demographics
+run: patient -> {
+  where: conditions.condition_concept.concept_name = 'Coronary arteriosclerosis'
+  group_by: age_band, gender.concept_name
+  aggregate: cohort_size is person_count
+  order_by: age_band
+}
+>>>markdown
+## Comorbidity comparison
+
+The reusable cohort shape from [`cohorts.malloynb`](cohorts.malloynb): define the
+cohort as a list of `person_id`s in the first stage, then `join_one: patient` and
+`nest:` each member's top other conditions. Here it runs twice - once per
+condition, changing only the `where` - so the two profiles sit side by side.
+
+Compare the outputs: COVID-19 members carry acute respiratory conditions, while
+coronary arteriosclerosis members carry cardiovascular comorbidities - the cohort
+filter is the only difference between the two queries.
+>>>malloy
+# COVID-19 cohort: top comorbidities
+run: condition_occurrence -> {
+  where: condition_concept.concept_name = 'COVID-19'
+  group_by: person_id
+} -> {
+  join_one: patient with person_id
+  aggregate: cohort_size is count()
+  nest: top_comorbidities is {
+    where: patient.conditions.condition_concept.concept_name != 'COVID-19'
+    group_by: comorbidity is patient.conditions.condition_concept.concept_name
+    aggregate: affected_patients is patient.conditions.patient_count
+    order_by: affected_patients desc
+    limit: 5
+  }
+}
+>>>malloy
+# Coronary arteriosclerosis cohort: top comorbidities
+run: condition_occurrence -> {
+  where: condition_concept.concept_name = 'Coronary arteriosclerosis'
+  group_by: person_id
+} -> {
+  join_one: patient with person_id
+  aggregate: cohort_size is count()
+  nest: top_comorbidities is {
+    where: patient.conditions.condition_concept.concept_name != 'Coronary arteriosclerosis'
+    group_by: comorbidity is patient.conditions.condition_concept.concept_name
+    aggregate: affected_patients is patient.conditions.patient_count
+    order_by: affected_patients desc
+    limit: 5
+  }
+}
+>>>markdown
+## Multi-criteria cohorts
+
+Combine condition and drug filters for a more specific cohort - here, coronary
+arteriosclerosis patients on a given drug (simvastatin, then clopidogrel). The
+multiple `where:` clauses apply independently across the join-many relationships.
+>>>malloy
+# Coronary arteriosclerosis patients on simvastatin
+run: patient -> {
+  where:
+    conditions.condition_concept.concept_name = 'Coronary arteriosclerosis',
+    drugs.drug_concept.concept_name ~ r'(?i)simvastatin'
+  group_by: age_band
+  aggregate: cohort_size is person_count
+  order_by: age_band
+}
+>>>malloy
+# Coronary arteriosclerosis patients on clopidogrel
+run: patient -> {
+  where:
+    conditions.condition_concept.concept_name = 'Coronary arteriosclerosis',
+    drugs.drug_concept.concept_name ~ r'(?i)clopidogrel'
+  group_by: age_band
+  aggregate: cohort_size is person_count
+  order_by: age_band
+}

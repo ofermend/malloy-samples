@@ -1,0 +1,78 @@
+>>>markdown
+# Vocabulary Explorer
+
+OMOP records every clinical fact with a numeric `concept_id`. Before writing a
+cohort query you need the right concept - e.g. which `concept_id`s mean
+"COVID-19" or "a statin". This dataset ships the **full OMOP vocabulary**
+(~5.9 million concepts), so the model joins fact tables to readable names and you
+can search the vocabulary directly.
+
+The `concept` source is just another table in the model. Searching it is a normal
+Malloy query: filter by `domain_id` to pick the clinical area, match
+`concept_name`, and keep `standard_concept = 'S'` for the standardized concepts
+you would actually use in a cohort.
+
+## Find a condition
+
+This returns the standardized concepts whose name matches "covid" in the
+`Condition` domain - the candidates you'd filter on in a cohort query.
+`domain_id` picks the clinical area; `concept_name ~ r'(?i)covid'` is a
+case-insensitive regex match (`~` matches a pattern, `(?i)` ignores case);
+`standard_concept = 'S'` keeps only *standard* concepts. (OMOP distinguishes
+standard concepts - the ones fact tables are mapped to - from source codes like
+ICD-10, which map *into* them. Filter on a source code and you'll miss patients
+recorded under a different one, so cohorts use standard concepts.)
+>>>malloy
+import 'omop.malloy'
+
+run: concept -> {
+  where:
+    domain_id = 'Condition',
+    concept_name ~ r'(?i)covid',
+    standard_concept = 'S'
+  select: concept_id, concept_name, vocabulary_id, concept_code
+  order_by: concept_name
+  limit: 10
+}
+>>>markdown
+## Find a drug
+
+The same pattern in the `Drug` domain - here, statins. Use the `concept_name` you
+find as the filter in any drug cohort query.
+>>>malloy
+run: concept -> {
+  where:
+    domain_id = 'Drug',
+    concept_name ~ r'(?i)statin',
+    standard_concept = 'S'
+  select: concept_id, concept_name, vocabulary_id
+  order_by: concept_name
+  limit: 10
+}
+>>>markdown
+## What's in the vocabulary
+
+A quick profile of the loaded vocabulary: how many concepts per domain, and which
+source vocabularies (SNOMED, RxNorm, LOINC, ...) supply them. `concept_count` is a
+measure defined once in the model and reused here.
+>>>malloy
+run: concept -> {
+  where: standard_concept = 'S'
+  group_by: domain_id
+  aggregate: concept_count
+  order_by: concept_count desc
+  limit: 12
+}
+>>>markdown
+## Source vocabularies within a domain
+
+Scope to one domain and see which vocabularies contribute its concepts - useful
+when you need to know whether to search SNOMED, RxNorm, or another vocabulary.
+>>>malloy
+run: concept -> {
+  where: domain_id = 'Condition'
+  group_by: vocabulary_id
+  aggregate: concept_count
+  order_by: concept_count desc
+  limit: 10
+}

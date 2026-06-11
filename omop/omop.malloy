@@ -1,0 +1,172 @@
+// Generic Malloy semantic model for OMOP Common Data Model v5.3 and v5.4.
+//
+// This model is database-agnostic and dataset-agnostic. It defines the clinical
+// semantics and relationships of OMOP, but assumes raw sources are defined elsewhere.
+//
+// To use with an OMOP dataset:
+// 1. Import a dataset-specific configuration file (e.g., 'omop_synthea_covid.malloy')
+// 2. That file defines the raw sources (concept, person, condition_occurrence, etc.)
+// 3. This file then extends those sources with semantic joins and reusable views
+//
+// Note: OMOP 5.4 renamed four visit columns (admitted_from, discharged_to),
+// but this model doesn't use those fields, so it's compatible with both versions.
+
+import 'omop_synthea_covid.malloy'
+
+// ==================== Semantic Layer ====================
+// Add all OMOP semantic knowledge: primary keys, joins, dimensions, measures
+// Raw sources (from omop_synthea_covid.malloy) are prefixed with 'omop_'
+
+source: concept is omop_concept extend {
+  primary_key: concept_id
+  measure: concept_count is count()
+}
+
+source: vocabulary is omop_vocabulary extend {
+  primary_key: vocabulary_id
+}
+
+source: domain is omop_domain extend {
+  primary_key: domain_id
+}
+
+source: person is omop_person extend {
+  primary_key: person_id
+  join_one: gender is concept on gender_concept_id = gender.concept_id
+  join_one: race is concept on race_concept_id = race.concept_id
+  join_one: ethnicity is concept on ethnicity_concept_id = ethnicity.concept_id
+
+  dimension:
+    age is year(now) - year_of_birth
+    age_band is age ?
+      pick '0-17'  when < 18
+      pick '18-39' when < 40
+      pick '40-64' when < 65
+      else '65+'
+
+  measure: person_count is count()
+}
+
+source: visit_occurrence is omop_visit_occurrence extend {
+  primary_key: visit_occurrence_id
+  join_one: person with person_id
+  join_one: visit_concept is concept on visit_concept_id = visit_concept.concept_id
+
+  measure:
+    visit_count is count()
+    patient_count is count(person_id)
+}
+
+source: condition_occurrence is omop_condition_occurrence extend {
+  primary_key: condition_occurrence_id
+  join_one: person with person_id
+  join_one: condition_concept is concept on condition_concept_id = condition_concept.concept_id
+
+  dimension:
+    dx_year is year(condition_start_date)
+
+  measure:
+    condition_count is count()
+    patient_count is count(person_id)
+}
+
+source: drug_exposure is omop_drug_exposure extend {
+  primary_key: drug_exposure_id
+  join_one: person with person_id
+  join_one: drug_concept is concept on drug_concept_id = drug_concept.concept_id
+
+  measure:
+    exposure_count is count()
+    patient_count is count(person_id)
+    // Synthea does not populate days_supply (~99% zero in this extract), so the
+    // sample notebooks avoid these two; on a real OMOP database they work as
+    // expected.
+    avg_days_supply is days_supply.avg()
+    total_days_supply is days_supply.sum()
+}
+
+source: procedure_occurrence is omop_procedure_occurrence extend {
+  primary_key: procedure_occurrence_id
+  join_one: person with person_id
+  join_one: procedure_concept is concept on procedure_concept_id = procedure_concept.concept_id
+
+  measure:
+    procedure_count is count()
+    patient_count is count(person_id)
+}
+
+source: observation_period is omop_observation_period extend {
+  primary_key: observation_period_id
+  join_one: person with person_id
+
+  dimension:
+    // Length of the patient's observation window. Synthea simulates lifelong
+    // periods, so this is lifespan-scale rather than a study follow-up window.
+    followup_days is days(observation_period_start_date to observation_period_end_date)
+    followup_years is followup_days / 365.25
+}
+
+source: death is omop_death extend {
+  primary_key: person_id
+  join_one: person with person_id
+  join_one: cause_concept is concept on cause_concept_id = cause_concept.concept_id
+
+  measure: death_count is count()
+}
+
+// Patient-centric view. Extends `person` with join_many to the four
+// most-queried fact tables. Use this source when you want to ask
+// "what does this patient look like across conditions, drugs, visits?"
+// in a single query — Malloy's symmetric aggregates make `conditions.count()`
+// and `drugs.count()` correct even though both join-many under person.
+source: patient is person extend {
+  join_many: conditions is condition_occurrence on person_id = conditions.person_id
+  join_many: drugs is drug_exposure on person_id = drugs.person_id
+  join_many: visits is visit_occurrence on person_id = visits.person_id
+  join_many: procedures is procedure_occurrence on person_id = procedures.person_id
+  // One row per patient: their death record (if any) and observation window.
+  join_one: death on person_id = death.person_id
+  join_one: observation_period on person_id = observation_period.person_id
+
+  dimension:
+    // Mortality status. The death table only holds deceased patients, so a
+    // matched death row means the patient died during observation.
+    vital_status is pick 'Died' when death.person_id is not null else 'Survived'
+
+  measure:
+    // Symmetric aggregates: each count below is correct independently
+    // of the others, even though all three tables fan out under person.
+    total_conditions is conditions.count()
+    total_drugs is drugs.count()
+    total_visits is visits.count()
+    total_procedures is procedures.count()
+    death_count is death.count()
+    mortality_rate is death.count() / count() * 100
+
+  view: demographics is {
+    group_by: gender.concept_name, age_band
+    aggregate: person_count
+  }
+
+  view: top_conditions is {
+    // Exclude patients with no condition records: in this patient-rooted view
+    // they fall into a NULL concept_name bucket (left-join with no match).
+    where: conditions.condition_concept.concept_name is not null
+    top: 10
+    group_by: conditions.condition_concept.concept_name
+    aggregate:
+      conditions.condition_count
+      affected_patients is conditions.patient_count
+  }
+
+  view: top_drugs is {
+    // Exclude patients with no drug records (same NULL-bucket reason as above).
+    where: drugs.drug_concept.concept_name is not null
+    top: 10
+    group_by: drugs.drug_concept.concept_name
+    aggregate:
+      drugs.exposure_count
+      patient_count is drugs.patient_count
+      drugs.avg_days_supply
+  }
+}

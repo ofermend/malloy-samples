@@ -1,0 +1,36 @@
+>>>markdown
+# Treatment Pathways
+
+A core OHDSI analysis: rank each patient's drug exposures by date and look at the **sequence** of prescriptions. In Malloy this is a two-stage pipeline - group + `row_number()` to rank prescriptions within each patient in the first stage, then re-aggregate across patients in the second.
+
+The `->` operator chains two query stages. The first stage groups by person/drug/date and uses `calculate: row_number() { partition_by: person_id }` to rank prescriptions *within each patient* (the `partition_by` resets the counter per patient - without it `row_number()` would number every row in the whole result). The second stage keeps the first three positions and counts which drugs appear at each. In SQL, this is a CTE plus a `ROW_NUMBER() OVER (PARTITION BY person_id ORDER BY date)`; in Malloy it's a linear pipeline.
+
+Below: the first three drugs prescribed to each patient in the dataset, ranked per patient.
+>>>malloy
+import 'omop.malloy'
+
+run: drug_exposure -> {
+  group_by: person_id, drug_name is drug_concept.concept_name, drug_exposure_start_date
+  order_by: person_id, drug_exposure_start_date
+  calculate: rx_order is row_number() { partition_by: person_id }
+} -> {
+  where: rx_order <= 3
+  group_by: rx_order, drug_name
+  aggregate: drug_count is count()
+  order_by: rx_order, drug_count desc
+}
+>>>markdown
+## First-line therapy
+
+If you only care about each patient's *first* prescription, keep only rank 1. The `where: rx_order = 1` filter keeps the first prescription per patient (again thanks to `partition_by: person_id`), then `group_by: drug_name` shows which drugs are most commonly prescribed first across the cohort.
+>>>malloy
+run: drug_exposure -> {
+  group_by: person_id, drug_name is drug_concept.concept_name, drug_exposure_start_date
+  order_by: person_id, drug_exposure_start_date
+  calculate: rx_order is row_number() { partition_by: person_id }
+} -> {
+  where: rx_order = 1
+  top: 10
+  group_by: drug_name
+  aggregate: patient_count is count(person_id)
+}
